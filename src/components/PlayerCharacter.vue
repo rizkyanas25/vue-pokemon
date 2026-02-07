@@ -2,15 +2,32 @@
 import { useGameStore } from '../stores/gameStore'
 import { TILE_SIZE } from '../constants/game'
 import { computed } from 'vue'
-import pikachuImg from '@/assets/sprites/pikachu.png' // Use alias for src
+import pikachuImg from '@/assets/sprites/pikachu.png'
+import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
+import charmanderImg from '@/assets/sprites/charmander.png'
+import squirtleImg from '@/assets/sprites/squirtle.png'
 
 const store = useGameStore()
+
+const spriteMap: Record<string, string> = {
+  pikachu: pikachuImg,
+  bulbasaur: bulbasaurImg,
+  charmander: charmanderImg,
+  squirtle: squirtleImg,
+}
+
+const activeSprite = computed(() => {
+  const active = store.player.party[store.player.activeIndex]
+  if (!active) return pikachuImg
+  if (active.species.sprite) return active.species.sprite
+  return spriteMap[active.species.key] ?? pikachuImg
+})
 
 const playerStyle = computed(() => ({
   width: `${TILE_SIZE}px`,
   height: `${TILE_SIZE}px`,
   transform: `translate(${store.player.x * TILE_SIZE}px, ${store.player.y * TILE_SIZE}px)`,
-  backgroundImage: `url(${pikachuImg})`,
+  backgroundImage: `url(${activeSprite.value})`,
   backgroundSize: 'contain',
   backgroundRepeat: 'no-repeat',
   backgroundPosition: 'center',

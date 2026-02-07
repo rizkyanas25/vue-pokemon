@@ -1,159 +1,281 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useGameStore } from '../stores/gameStore'
+import { getMoveData } from '../data/battle/moves'
+import { applyExperience, resetBattleStages } from '../engine/pokemon'
+import {
+  applyEndOfTurnStatus,
+  chooseMove,
+  getEffectiveStat,
+  getMoveDataFromState,
+  getStatusLabel,
+  resolveMove,
+} from '../engine/battle'
+import type { MoveState, PokemonInstance } from '../engine/pokemon'
+
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
+import charmanderImg from '@/assets/sprites/charmander.png'
+import squirtleImg from '@/assets/sprites/squirtle.png'
+
+type UiState = 'INPUT' | 'MESSAGE'
+type PendingEnd = 'WIN' | 'LOSE' | 'RUN' | null
 
 const store = useGameStore()
 
-const enemy = ref({
-  name: 'Wild Bulbasaur',
-  maxHp: 20,
-  hp: 20,
-  sprite: bulbasaurImg,
-})
+const playerPokemon = computed(() => store.player.party[store.player.activeIndex])
+const enemyPokemon = computed(() => store.battle?.enemy ?? null)
 
-const playerPokemon = ref({
-  name: 'Pikachu',
-  maxHp: 25,
-  hp: 25,
-  sprite: pikachuImg,
-})
+const spriteMap: Record<string, string> = {
+  pikachu: pikachuImg,
+  bulbasaur: bulbasaurImg,
+  charmander: charmanderImg,
+  squirtle: squirtleImg,
+}
 
-// Battle State Machine
-type BattleState =
-  | 'PLAYER_INPUT'
-  | 'PLAYER_ATTACK_ANIM'
-  | 'ENEMY_TURN'
-  | 'ENEMY_ATTACK_ANIM'
-  | 'WIN'
-  | 'LOSE'
-  | 'RUN'
+const uiState = ref<UiState>('MESSAGE')
+const pendingEnd = ref<PendingEnd>(null)
+const messageQueue = ref<string[]>([])
+const currentMessage = ref('')
 
-const battleState = ref<BattleState>('PLAYER_INPUT')
-const battleLog = ref('A wild Pokemon appeared!')
+const queueMessages = (messages: string[]) => {
+  const filtered = messages.filter(Boolean)
+  if (filtered.length === 0) return
+  messageQueue.value.push(...filtered)
+  if (!currentMessage.value) showNextMessage()
+}
 
-// Computed to show menu or text
-const showMenu = computed(() => battleState.value === 'PLAYER_INPUT' && battleLog.value === '')
-
-const attack = () => {
-  if (battleState.value !== 'PLAYER_INPUT') return
-
-  // Player attacks
-  const damage = Math.floor(Math.random() * 5) + 2
-  enemy.value.hp = Math.max(0, enemy.value.hp - damage)
-  battleLog.value = `${playerPokemon.value.name} used Thunder Shock!`
-
-  if (enemy.value.hp <= 0) {
-    battleState.value = 'WIN'
-  } else {
-    battleState.value = 'PLAYER_ATTACK_ANIM' // Waiting for user to click text
+const showNextMessage = () => {
+  const next = messageQueue.value.shift()
+  if (next) {
+    currentMessage.value = next
+    uiState.value = 'MESSAGE'
+    return
   }
+
+  currentMessage.value = ''
+  if (pendingEnd.value) {
+    finishBattle()
+  } else {
+    uiState.value = 'INPUT'
+  }
+}
+
+const advanceMessage = () => {
+  if (uiState.value !== 'MESSAGE') return
+  showNextMessage()
+}
+
+const getSprite = (pokemon: PokemonInstance | null) => {
+  if (!pokemon) return ''
+  if (pokemon.species.sprite) return pokemon.species.sprite
+  const key = pokemon.species.key ?? pokemon.species.name.toLowerCase()
+  return spriteMap[key] ?? ''
+}
+
+const hpPercent = (pokemon: PokemonInstance | null) => {
+  if (!pokemon) return 0
+  return Math.max(0, Math.min(100, (pokemon.currentHp / pokemon.stats.hp) * 100))
+}
+
+const playerStatus = computed(() => getStatusLabel(playerPokemon.value.status))
+const enemyStatus = computed(() => (enemyPokemon.value ? getStatusLabel(enemyPokemon.value.status) : ''))
+
+const resolveTurn = (playerMoveState: MoveState) => {
+  const player = playerPokemon.value
+  const enemy = enemyPokemon.value
+  if (!player || !enemy) return
+
+  if (playerMoveState.pp <= 0) {
+    queueMessages([`${player.name} has no PP left!`])
+    return
+  }
+
+  playerMoveState.pp -= 1
+  const playerMove = getMoveDataFromState(playerMoveState)
+  const enemyMoveState = chooseMove(enemy)
+  const enemyMove = enemyMoveState ? getMoveDataFromState(enemyMoveState) : null
+
+  const actions = [
+    { actor: player, target: enemy, move: playerMove, moveState: playerMoveState },
+    enemyMove
+      ? { actor: enemy, target: player, move: enemyMove, moveState: enemyMoveState }
+      : null,
+  ].filter(Boolean) as Array<{
+    actor: PokemonInstance
+    target: PokemonInstance
+    move: ReturnType<typeof getMoveData>
+    moveState: MoveState
+  }>
+
+  actions.sort((a, b) => {
+    const priorityA = a.move.priority ?? 0
+    const priorityB = b.move.priority ?? 0
+    if (priorityA !== priorityB) return priorityB - priorityA
+
+    const speedA = getEffectiveStat(a.actor, 'spe')
+    const speedB = getEffectiveStat(b.actor, 'spe')
+    if (speedA !== speedB) return speedB - speedA
+
+    return Math.random() < 0.5 ? -1 : 1
+  })
+
+  const messages: string[] = []
+
+  for (const action of actions) {
+    if (action.actor.currentHp <= 0 || action.target.currentHp <= 0) continue
+
+    messages.push(`${action.actor.name} used ${action.move.name}!`)
+    const result = resolveMove(action.actor, action.target, action.move)
+    messages.push(...result.messages)
+
+    if (action.target.currentHp <= 0) {
+      messages.push(`${action.target.name} fainted!`)
+      break
+    }
+  }
+
+  if (enemy.currentHp <= 0) {
+    const expGain = Math.floor((enemy.species.baseExp * enemy.level) / 7)
+    messages.push(`${player.name} gained ${expGain} EXP!`)
+    const { levelsGained } = applyExperience(player, expGain)
+    if (levelsGained > 0) {
+      messages.push(`${player.name} grew to level ${player.level}!`)
+    }
+    pendingEnd.value = 'WIN'
+  } else if (player.currentHp <= 0) {
+    messages.push(`${player.name} fainted...`)
+    pendingEnd.value = 'LOSE'
+  } else {
+    const endMessages: string[] = []
+    const playerEnd = applyEndOfTurnStatus(player)
+    if (playerEnd.message) endMessages.push(playerEnd.message)
+    const enemyEnd = applyEndOfTurnStatus(enemy)
+    if (enemyEnd.message) endMessages.push(enemyEnd.message)
+
+    if (player.currentHp <= 0) {
+      endMessages.push(`${player.name} fainted...`)
+      pendingEnd.value = 'LOSE'
+    }
+    if (enemy.currentHp <= 0) {
+      endMessages.push(`${enemy.name} fainted!`)
+      pendingEnd.value = 'WIN'
+    }
+
+    messages.push(...endMessages)
+  }
+
+  uiState.value = 'MESSAGE'
+  queueMessages(messages)
+}
+
+const selectMove = (moveState: MoveState) => {
+  if (uiState.value !== 'INPUT') return
+  resolveTurn(moveState)
 }
 
 const run = () => {
-  battleLog.value = 'Got away safely!'
-  battleState.value = 'RUN'
+  if (uiState.value !== 'INPUT') return
+  pendingEnd.value = 'RUN'
+  queueMessages(['Got away safely!'])
 }
 
-const nextText = () => {
-  if (battleLog.value === '') return
-
-  // Clear current text
-  battleLog.value = ''
-
-  // Handle state transitions based on what just happened
-  if (battleState.value === 'PLAYER_ATTACK_ANIM') {
-    // Pokemon took damage text?
-    battleLog.value = `Dealt damage!`
-    battleState.value = 'ENEMY_TURN'
-    return
-  }
-
-  if (battleState.value === 'ENEMY_TURN') {
-    const damage = Math.floor(Math.random() * 4) + 1
-    playerPokemon.value.hp = Math.max(0, playerPokemon.value.hp - damage)
-    battleLog.value = `${enemy.value.name} used Tackle!`
-
-    if (playerPokemon.value.hp <= 0) {
-      battleState.value = 'LOSE'
-    } else {
-      battleState.value = 'ENEMY_ATTACK_ANIM'
+const finishBattle = () => {
+  const player = playerPokemon.value
+  const enemy = enemyPokemon.value
+  if (player) {
+    resetBattleStages(player)
+    player.status = 'none'
+    player.statusTurns = 0
+    if (pendingEnd.value === 'LOSE') {
+      player.currentHp = player.stats.hp
     }
-    return
+  }
+  if (enemy) {
+    resetBattleStages(enemy)
+    enemy.status = 'none'
+    enemy.statusTurns = 0
   }
 
-  if (battleState.value === 'ENEMY_ATTACK_ANIM') {
-    battleLog.value = `Took damage!`
-    battleState.value = 'PLAYER_INPUT' // Back to menu
-    return
-  }
-
-  if (battleState.value === 'WIN') {
-    battleLog.value = 'Enemy fainted! You won!'
-    // Next click exits
-    setTimeout(() => (store.gameState = 'ROAMING'), 1000)
-  }
-
-  if (battleState.value === 'LOSE') {
-    battleLog.value = 'You fainted...'
-    setTimeout(() => {
-      playerPokemon.value.hp = playerPokemon.value.maxHp
-      store.gameState = 'ROAMING'
-    }, 1000)
-  }
-
-  if (battleState.value === 'RUN') {
-    store.gameState = 'ROAMING'
-  }
+  pendingEnd.value = null
+  store.endBattle()
 }
+
+onMounted(() => {
+  const enemy = enemyPokemon.value
+  const player = playerPokemon.value
+  if (player) resetBattleStages(player)
+  if (enemy) resetBattleStages(enemy)
+  if (enemy) queueMessages([`A wild ${enemy.name} appeared!`])
+})
 </script>
 
 <template>
-  <div class="battle-scene">
+  <div class="battle-scene" v-if="enemyPokemon && playerPokemon">
     <div class="battle-arena">
-      <!-- Enemy HUD -->
       <div class="hud enemy-hud">
-        <div class="name">{{ enemy.name }}</div>
-        <div class="hp-bar">
-          <div class="hp-fill" :style="{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }"></div>
+        <div class="name">
+          {{ enemyPokemon.name }} Lv{{ enemyPokemon.level }}
+          <span v-if="enemyStatus" class="status">{{ enemyStatus }}</span>
         </div>
-        <div class="hp-text">{{ enemy.hp }} / {{ enemy.maxHp }}</div>
+        <div class="hp-bar">
+          <div class="hp-fill" :style="{ width: `${hpPercent(enemyPokemon)}%` }"></div>
+        </div>
+        <div class="hp-text">{{ enemyPokemon.currentHp }} / {{ enemyPokemon.stats.hp }}</div>
       </div>
 
       <div class="sprite-container enemy-sprite">
-        <img :src="enemy.sprite" alt="Enemy" />
+        <img v-if="getSprite(enemyPokemon)" :src="getSprite(enemyPokemon)" alt="Enemy" />
+        <div v-else class="sprite-placeholder"></div>
       </div>
 
-      <!-- Player Sprite -->
       <div class="sprite-container player-sprite">
-        <img :src="playerPokemon.sprite" alt="Player" />
+        <img v-if="getSprite(playerPokemon)" :src="getSprite(playerPokemon)" alt="Player" />
+        <div v-else class="sprite-placeholder"></div>
       </div>
 
-      <!-- Player HUD -->
       <div class="hud player-hud">
-        <div class="name">{{ playerPokemon.name }}</div>
-        <div class="hp-bar">
-          <div
-            class="hp-fill"
-            :style="{ width: `${(playerPokemon.hp / playerPokemon.maxHp) * 100}%` }"
-          ></div>
+        <div class="name">
+          {{ playerPokemon.name }} Lv{{ playerPokemon.level }}
+          <span v-if="playerStatus" class="status">{{ playerStatus }}</span>
         </div>
-        <div class="hp-text">{{ playerPokemon.hp }} / {{ playerPokemon.maxHp }}</div>
+        <div class="hp-bar">
+          <div class="hp-fill" :style="{ width: `${hpPercent(playerPokemon)}%` }"></div>
+        </div>
+        <div class="hp-text">{{ playerPokemon.currentHp }} / {{ playerPokemon.stats.hp }}</div>
       </div>
     </div>
 
-    <!-- Dialog / Menu -->
-    <div class="battle-menu">
-      <div class="battle-text" v-if="!showMenu" @click="nextText" style="cursor: pointer">
-        {{ battleLog }}
+    <div
+      class="battle-menu"
+      :class="{ clickable: uiState === 'MESSAGE' }"
+      @click="uiState === 'MESSAGE' && advanceMessage()"
+    >
+      <div class="battle-text" v-if="uiState === 'MESSAGE'" @click="advanceMessage">
+        {{ currentMessage }}
         <span class="blinking-arrow">▼</span>
       </div>
-      <div class="actions" v-else>
-        <button @click="attack">FIGHT</button>
-        <button>BAG</button>
-        <button>POKEMON</button>
-        <button @click="run">RUN</button>
+      <div v-else class="menu">
+        <div class="moves">
+          <button
+            v-for="moveState in playerPokemon.moves"
+            :key="moveState.id"
+            class="move-button"
+            :disabled="moveState.pp <= 0"
+            @click="selectMove(moveState)"
+          >
+            <div class="move-name">{{ getMoveData(moveState.id).name }}</div>
+            <div class="move-meta">
+              PP {{ moveState.pp }}/{{ getMoveData(moveState.id).pp }} ·
+              {{ getMoveData(moveState.id).type.toUpperCase() }}
+            </div>
+          </button>
+        </div>
+        <div class="utility">
+          <button disabled>BAG</button>
+          <button disabled>POKEMON</button>
+          <button @click="run">RUN</button>
+        </div>
       </div>
     </div>
   </div>
@@ -170,7 +292,7 @@ const nextText = () => {
   display: flex;
   flex-direction: column;
   font-family: 'Press Start 2P', cursive;
-  z-index: 200; /* Above UI overlay */
+  z-index: 200;
   background-image: linear-gradient(to bottom, #d0f8d0 0%, #d0f8d0 50%, #70b870 50%, #70b870 100%);
 }
 
@@ -183,8 +305,16 @@ const nextText = () => {
   position: absolute;
 }
 .sprite-container img {
-  width: 144px; /* 3x scale */
+  width: 144px;
   image-rendering: pixelated;
+}
+
+.sprite-placeholder {
+  width: 120px;
+  height: 120px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 2px dashed #666;
 }
 
 .enemy-sprite {
@@ -195,7 +325,7 @@ const nextText = () => {
 .player-sprite {
   bottom: 20px;
   left: 40px;
-  transform: scaleX(-1); /* Flip if using front sprite */
+  transform: scaleX(-1);
 }
 
 .hud {
@@ -204,8 +334,24 @@ const nextText = () => {
   border: 2px solid #333;
   border-radius: 4px;
   padding: 8px;
-  width: 200px;
-  color: #000; /* Ensure text is visible */
+  width: 230px;
+  color: #000;
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status {
+  font-size: 10px;
+  color: #111;
+  background: #f4d35e;
+  border: 1px solid #111;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .enemy-hud {
@@ -233,38 +379,87 @@ const nextText = () => {
 }
 
 .battle-menu {
-  height: 120px;
+  min-height: 160px;
   background: #333;
   color: white;
   padding: 16px;
   border-top: 4px solid #000;
 }
 
-.actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  height: 100%;
-}
-
-button {
-  background: #fff;
-  border: 2px solid #888;
-  font-family: inherit;
-  font-size: 16px;
+.battle-menu.clickable {
   cursor: pointer;
-  text-align: left;
-  padding: 10px;
-}
-button:hover {
-  background: #eee;
-  border-color: #f00;
 }
 
 .battle-text {
   font-size: 18px;
   line-height: 1.5;
   position: relative;
+  cursor: pointer;
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.moves {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.move-button {
+  background: #fff;
+  border: 2px solid #888;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  padding: 10px;
+  color: #111;
+}
+
+.move-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.move-button:hover:not(:disabled) {
+  background: #eee;
+  border-color: #f00;
+}
+
+.move-name {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.move-meta {
+  font-size: 10px;
+  color: #444;
+}
+
+.utility {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.utility button {
+  background: #fff;
+  border: 2px solid #888;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: center;
+  padding: 10px;
+  color: #111;
+}
+
+.utility button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .blinking-arrow {

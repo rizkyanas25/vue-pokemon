@@ -5,13 +5,25 @@ import WorldMap from './components/WorldMap.vue'
 import PlayerCharacter from './components/PlayerCharacter.vue'
 import BattleScene from './components/BattleScene.vue'
 import DialogBox from './components/DialogBox.vue'
+import GameMenu from './components/GameMenu.vue'
+import StarterSelect from './components/StarterSelect.vue'
+import LoadingOverlay from './components/LoadingOverlay.vue'
 
 const store = useGameStore()
 
 const handleKeydown = (e: KeyboardEvent) => {
+  if (store.isLoading || store.gameState === 'STARTER') return
+
   if (store.gameState === 'DIALOG') {
     if (e.key === 'Enter' || e.key === ' ') {
       if (!e.repeat) store.advanceDialog()
+    }
+    return
+  }
+
+  if (store.gameState === 'MENU') {
+    if ((e.key === 'Escape' || e.key === 'm') && !e.repeat) {
+      store.closeMenu()
     }
     return
   }
@@ -39,6 +51,10 @@ const handleKeydown = (e: KeyboardEvent) => {
       store.setDirection('right')
       store.movePlayer(1, 0)
       break
+    case 'Escape':
+    case 'm':
+      if (!e.repeat) store.openMenu()
+      break
     case 'Enter':
     case ' ':
     case 'e':
@@ -49,6 +65,7 @@ const handleKeydown = (e: KeyboardEvent) => {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
+  store.bootstrap()
 })
 
 onUnmounted(() => {
@@ -60,8 +77,12 @@ onUnmounted(() => {
   <main class="game-container">
     <div class="ui-overlay">
       <h1>Pokemon Vue</h1>
-      <p v-if="store.gameState === 'ROAMING'">Move with Arrow Keys, talk with Enter/Space</p>
+      <p v-if="store.gameState === 'ROAMING'">
+        Move with Arrow Keys, talk with Enter/Space, menu with M/Esc
+      </p>
       <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
+      <p v-else-if="store.gameState === 'MENU'">Menu</p>
+      <p v-else-if="store.gameState === 'STARTER'">Choose your starter</p>
       <p v-else>Battle Mode!</p>
     </div>
 
@@ -77,6 +98,9 @@ onUnmounted(() => {
     </div>
 
     <DialogBox v-if="store.gameState === 'DIALOG' && store.dialog" :dialog="store.dialog" />
+    <GameMenu v-if="store.gameState === 'MENU'" />
+    <StarterSelect v-if="store.gameState === 'STARTER'" />
+    <LoadingOverlay v-if="store.isLoading" />
   </main>
 </template>
 
