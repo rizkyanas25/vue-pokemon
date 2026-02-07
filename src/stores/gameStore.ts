@@ -8,10 +8,25 @@ import { fetchPokemonSpecies, normalizeSpeciesKey } from '../data/pokeapi'
 import type { TypeId } from '../data/battle/types'
 import { ITEM_CATALOG, type ItemId } from '../data/items'
 import { SHOPS } from '../data/shops'
-import { TRAINER_SPRITES, trainerSprite, type TrainerSpriteId } from '../data/trainers'
+import {
+  TRAINER_SPRITES,
+  trainerSprite,
+  type TrainerSpriteId,
+  PLAYER_TRAINERS,
+  type PlayerTrainerId,
+  type PlayerTrainer,
+} from '../data/trainers'
 
 export type Direction = 'up' | 'down' | 'left' | 'right'
-export type GameState = 'ROAMING' | 'BATTLE' | 'MENU' | 'DIALOG' | 'STARTER' | 'SHOP'
+export type GameState =
+  | 'ROAMING'
+  | 'BATTLE'
+  | 'MENU'
+  | 'DIALOG'
+  | 'STARTER'
+  | 'SHOP'
+  | 'TRAINER_SELECT'
+  | 'TRANSITION'
 export type MenuTab = 'party' | 'bag' | 'pokedex' | 'save'
 
 export type BagItem = {
@@ -24,6 +39,16 @@ type BattleOutcome = 'WIN' | 'LOSE' | 'RUN'
 
 type BattleState = {
   enemy: PokemonInstance
+  terrain: BattleTerrain
+  trainerId?: string
+  trainerName?: string
+  trainerSprite?: string | null
+}
+
+type PendingBattle = {
+  kind: 'wild' | 'trainer'
+  enemyLevel: number
+  enemyLookup: number | string
   terrain: BattleTerrain
   trainerId?: string
   trainerName?: string
@@ -44,6 +69,9 @@ const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice
 const placeholderStats = { hp: 50, atk: 50, def: 50, spa: 50, spd: 50, spe: 50 }
 
 export const useGameStore = defineStore('game', () => {
+  const MOVE_ANIM_MS = 200
+  const GLITCH_MS = 520
+
   const gameState = ref<GameState>('ROAMING')
   const isLoading = ref(true)
 
@@ -58,11 +86,15 @@ export const useGameStore = defineStore('game', () => {
     activeIndex: 0,
     party: [] as PokemonInstance[],
   })
+  const playerTrainer = ref<PlayerTrainer | null>(null)
 
   const currentMap = ref<TileId[][]>(overworldMap.tiles)
   const npcs = ref<NpcData[]>(overworldNpcs)
 
   const battle = ref<BattleState | null>(null)
+  const battleTransition = ref<{ kind: 'wild' | 'trainer' } | null>(null)
+  const pendingBattle = ref<PendingBattle | null>(null)
+  const encounterLock = ref(false)
   const menuTab = ref<MenuTab>('party')
   const worldPos = ref({ x: 1, y: 1 })
   const mapCache = ref<Record<string, TileId[][]>>({})
@@ -75,7 +107,7 @@ export const useGameStore = defineStore('game', () => {
   ])
 
   const saveKey = 'pokemon-vue-save-v3'
-  const MAP_VERSION = 2
+  const MAP_VERSION = 3
   const legacySaveKey = 'pokemon-vue-save-v2'
   const legacySaveKeyV1 = 'pokemon-vue-save-v1'
   const hasSaveData = ref(false)
@@ -184,6 +216,63 @@ export const useGameStore = defineStore('game', () => {
   const isTrainerNpc = (npc: NpcData) => npc.role === 'trainer'
   const isTrainerActive = (npc: NpcData) => isTrainerNpc(npc) && !npc.defeated
 
+  const clearPendingBattle = () => {
+    pendingBattle.value = null
+    encounterLock.value = false
+    battleTransition.value = null
+  }
+
+  const startPendingBattle = async () => {
+    const pending = pendingBattle.value
+    if (!pending) {
+      if (gameState.value === 'TRANSITION') gameState.value = 'ROAMING'
+      clearPendingBattle()
+      return
+    }
+
+    try {
+      const species = await ensureSpecies(pending.enemyLookup)
+      battle.value = {
+        enemy: createPokemonInstance(species, pending.enemyLevel),
+        terrain: pending.terrain,
+        trainerId: pending.trainerId,
+        trainerName: pending.trainerName,
+        trainerSprite: pending.trainerSprite,
+      }
+      markSeen(species)
+      gameState.value = 'BATTLE'
+    } finally {
+      clearPendingBattle()
+    }
+  }
+
+  const beginBattleTransition = (kind: 'wild' | 'trainer') => {
+    if (battleTransition.value) return
+    battleTransition.value = { kind }
+    gameState.value = 'TRANSITION'
+    window.setTimeout(() => {
+      void startPendingBattle()
+    }, GLITCH_MS)
+  }
+
+  const queueBattle = (
+    pending: PendingBattle,
+    options: { delayMs?: number; autoTransition?: boolean } = {},
+  ) => {
+    if (pendingBattle.value) return
+    pendingBattle.value = pending
+    encounterLock.value = true
+    const delayMs = options.delayMs ?? 0
+    const autoTransition = options.autoTransition ?? true
+    if (!autoTransition) return
+
+    if (delayMs > 0) {
+      window.setTimeout(() => beginBattleTransition(pending.kind), delayMs)
+    } else {
+      beginBattleTransition(pending.kind)
+    }
+  }
+
   const buildReachableSet = (tiles: TileId[][]) => {
     const height = tiles.length
     const width = tiles[0]?.length ?? 0
@@ -268,6 +357,14 @@ export const useGameStore = defineStore('game', () => {
   const randomTrainerSprite = () =>
     TRAINER_SPRITES[Math.floor(Math.random() * TRAINER_SPRITES.length)] as TrainerSpriteId
 
+  const isSpawnableTile = (tiles: TileId[][], x: number, y: number) => {
+    const row = tiles[y]
+    if (!row) return false
+    const tile = row[x]
+    if (tile === undefined) return false
+    return WALKABLE_TILES.has(tile) && tile !== TILE.BUSH
+  }
+
   const findRandomWalkableSpot = (
     tiles: TileId[][],
     existing: NpcData[],
@@ -280,7 +377,7 @@ export const useGameStore = defineStore('game', () => {
     for (let i = 0; i < attempts; i += 1) {
       const x = Math.floor(Math.random() * Math.max(1, width - 4)) + 2
       const y = Math.floor(Math.random() * Math.max(1, height - 4)) + 2
-      if (!isTileWalkable(tiles, x, y)) continue
+      if (!isSpawnableTile(tiles, x, y)) continue
       if (reachable && !reachable.has(`${x},${y}`)) continue
       if (existing.some((npc) => npc.x === x && npc.y === y)) continue
       return { x, y }
@@ -338,11 +435,39 @@ export const useGameStore = defineStore('game', () => {
         if (rand < 0.08) row.push(TILE.WATER)
         else if (rand < 0.12) row.push(TILE.WALL)
         else if (rand < 0.2) row.push(TILE.PATH)
+        else if (rand < 0.45) row.push(TILE.BUSH)
         else row.push(TILE.GRASS)
       }
       tiles.push(row)
     }
+    addBridges(tiles)
     return tiles
+  }
+
+  const addBridges = (tiles: TileId[][]) => {
+    const height = tiles.length
+    const width = tiles[0]?.length ?? 0
+    for (let y = 1; y < height - 1; y += 1) {
+      let runStart = -1
+      for (let x = 1; x <= width; x += 1) {
+        const isWater = x < width && tiles[y]?.[x] === TILE.WATER
+        if (isWater && runStart === -1) {
+          runStart = x
+          continue
+        }
+        if (!isWater && runStart !== -1) {
+          const runLength = x - runStart
+          if (runLength >= 3 && Math.random() < 0.4) {
+            const bridgeLength = Math.min(3, runLength)
+            const start = runStart + Math.floor((runLength - bridgeLength) / 2)
+            for (let i = 0; i < bridgeLength; i += 1) {
+              tiles[y][start + i] = TILE.BRIDGE
+            }
+          }
+          runStart = -1
+        }
+      }
+    }
   }
 
   const ensureMapAt = (x: number, y: number) => {
@@ -409,7 +534,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function movePlayer(dx: number, dy: number) {
-    if (gameState.value !== 'ROAMING' || isLoading.value) return
+    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value) return
 
     ensurePlayerOnWalkable()
 
@@ -425,11 +550,11 @@ export const useGameStore = defineStore('game', () => {
       if (nextWorldX < 0 || nextWorldX > 2 || nextWorldY < 0 || nextWorldY > 2) return false
 
       setCurrentMap(nextWorldX, nextWorldY)
-      const targetX = dx > 0 ? 1 : dx < 0 ? width - 2 : player.value.x
-      const targetY = dy > 0 ? 1 : dy < 0 ? height - 2 : player.value.y
+      const targetX = dx > 0 ? 0 : dx < 0 ? width - 1 : player.value.x
+      const targetY = dy > 0 ? 0 : dy < 0 ? height - 1 : player.value.y
 
-      const adjustedX = Math.min(Math.max(targetX, 1), width - 2)
-      const adjustedY = Math.min(Math.max(targetY, 1), height - 2)
+      const adjustedX = Math.min(Math.max(targetX, 0), width - 1)
+      const adjustedY = Math.min(Math.max(targetY, 0), height - 1)
 
       const isFree = (x: number, y: number) =>
         isTileWalkable(currentMap.value, x, y) && !getNpcAt(x, y)
@@ -437,10 +562,10 @@ export const useGameStore = defineStore('game', () => {
       if (!isFree(adjustedX, adjustedY)) {
         // find nearest walkable tile along the entry edge
         for (let offset = 0; offset < Math.max(width, height); offset += 1) {
-          const candidateY = Math.min(Math.max(adjustedY + offset, 1), height - 2)
-          const candidateY2 = Math.min(Math.max(adjustedY - offset, 1), height - 2)
-          const candidateX = Math.min(Math.max(adjustedX + offset, 1), width - 2)
-          const candidateX2 = Math.min(Math.max(adjustedX - offset, 1), width - 2)
+          const candidateY = Math.min(Math.max(adjustedY + offset, 0), height - 1)
+          const candidateY2 = Math.min(Math.max(adjustedY - offset, 0), height - 1)
+          const candidateX = Math.min(Math.max(adjustedX + offset, 0), width - 1)
+          const candidateX2 = Math.min(Math.max(adjustedX - offset, 0), width - 1)
           if (isFree(adjustedX, candidateY)) {
             player.value.x = adjustedX
             player.value.y = candidateY
@@ -470,8 +595,9 @@ export const useGameStore = defineStore('game', () => {
       return true
     }
 
-    if (newX <= 0 || newX >= width - 1 || newY <= 0 || newY >= height - 1) {
+    if (newX < 0 || newX > width - 1 || newY < 0 || newY > height - 1) {
       if (tryTransition()) return
+      return
     }
 
     const row = currentMap.value[newY]
@@ -491,7 +617,7 @@ export const useGameStore = defineStore('game', () => {
       return
     }
 
-    if (tile === TILE.GRASS && Math.random() < 0.08) {
+    if (tile === TILE.BUSH && Math.random() < 0.12) {
       void startWildBattle(tile)
     }
 
@@ -508,51 +634,56 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function startTrainerBattle(npc: NpcData, tile?: TileId) {
-    if (gameState.value !== 'ROAMING' || isLoading.value) return Promise.resolve()
+    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value) return Promise.resolve()
     if (!player.value.party[player.value.activeIndex]) return Promise.resolve()
 
-    isLoading.value = true
     const enemyLevel = Math.max(2, player.value.party[player.value.activeIndex].level)
     const foeLookup = npc.pokemonId ?? npc.pokemonKey ?? Math.floor(Math.random() * 151) + 1
     const terrain: BattleTerrain =
-      tile === TILE.WATER ? 'water' : tile === TILE.GRASS ? 'grass' : 'default'
+      tile === TILE.WATER ? 'water' : tile === TILE.GRASS || tile === TILE.BUSH ? 'grass' : 'default'
 
-    return ensureSpecies(foeLookup)
-      .then((species) => {
-        battle.value = {
-          enemy: createPokemonInstance(species, enemyLevel),
-          terrain,
-          trainerId: npc.id,
-          trainerName: npc.name,
-          trainerSprite: npc.sprite ?? null,
-        }
-        markSeen(species)
-        gameState.value = 'BATTLE'
-      })
-      .finally(() => {
-        isLoading.value = false
-      })
+    queueBattle(
+      {
+        kind: 'trainer',
+        enemyLevel,
+        enemyLookup: foeLookup,
+        terrain,
+        trainerId: npc.id,
+        trainerName: npc.name,
+        trainerSprite: npc.sprite ?? null,
+      },
+      { autoTransition: false },
+    )
+
+    const dialogLines = npc.dialog?.length ? npc.dialog : [`${npc.name} wants to battle!`]
+    dialog.value = {
+      speaker: npc.name,
+      lines: dialogLines,
+      index: 0,
+    }
+    gameState.value = 'DIALOG'
+    return Promise.resolve()
   }
 
   function startWildBattle(tile?: TileId) {
-    if (gameState.value !== 'ROAMING' || isLoading.value) return Promise.resolve()
+    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value) return Promise.resolve()
     if (!player.value.party[player.value.activeIndex]) return Promise.resolve()
 
-    isLoading.value = true
     const enemyLevel = Math.max(2, player.value.party[player.value.activeIndex].level - 1)
     const randomId = Math.floor(Math.random() * 151) + 1
     const terrain: BattleTerrain =
-      tile === TILE.WATER ? 'water' : tile === TILE.GRASS ? 'grass' : 'default'
+      tile === TILE.WATER ? 'water' : tile === TILE.GRASS || tile === TILE.BUSH ? 'grass' : 'default'
 
-    return ensureSpecies(randomId)
-      .then((species) => {
-        battle.value = { enemy: createPokemonInstance(species, enemyLevel), terrain }
-        markSeen(species)
-        gameState.value = 'BATTLE'
-      })
-      .finally(() => {
-        isLoading.value = false
-      })
+    queueBattle(
+      {
+        kind: 'wild',
+        enemyLevel,
+        enemyLookup: randomId,
+        terrain,
+      },
+      { delayMs: MOVE_ANIM_MS },
+    )
+    return Promise.resolve()
   }
 
   const markTrainerDefeated = (trainerId: string) => {
@@ -566,12 +697,17 @@ export const useGameStore = defineStore('game', () => {
     }
     battle.value = null
     gameState.value = 'ROAMING'
+    encounterLock.value = false
+    battleTransition.value = null
+    pendingBattle.value = null
   }
 
   function openMenu(tab?: MenuTab) {
     if (
       gameState.value === 'BATTLE' ||
       gameState.value === 'STARTER' ||
+      gameState.value === 'TRAINER_SELECT' ||
+      gameState.value === 'TRANSITION' ||
       gameState.value === 'SHOP' ||
       isLoading.value
     )
@@ -646,6 +782,7 @@ export const useGameStore = defineStore('game', () => {
       version: 3,
       savedAt: new Date().toISOString(),
       player: player.value,
+      playerTrainer: playerTrainer.value,
       bag: bag.value,
       money: money.value,
       pokedex: pokedex.value,
@@ -751,6 +888,7 @@ export const useGameStore = defineStore('game', () => {
         ]
       }
 
+      playerTrainer.value = data.playerTrainer ?? null
       money.value = typeof data.money === 'number' ? data.money : money.value
 
       const loadedWorld = data.worldPos ?? worldPos.value
@@ -812,7 +950,9 @@ export const useGameStore = defineStore('game', () => {
     setCurrentMap(worldPos.value.x, worldPos.value.y)
 
     const loaded = await loadGame()
-    if (loaded && player.value.party.length > 0) {
+    if (!playerTrainer.value) {
+      gameState.value = 'TRAINER_SELECT'
+    } else if (loaded && player.value.party.length > 0) {
       gameState.value = 'ROAMING'
     } else {
       gameState.value = 'STARTER'
@@ -858,6 +998,17 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  function chooseTrainer(id: PlayerTrainerId) {
+    const trainer = PLAYER_TRAINERS[id]
+    if (!trainer) return
+    playerTrainer.value = trainer
+    if (player.value.party.length > 0) {
+      gameState.value = 'ROAMING'
+    } else {
+      gameState.value = 'STARTER'
+    }
+  }
+
   function tryInteract() {
     if (gameState.value !== 'ROAMING' || isLoading.value) return
     const target = getFrontTile()
@@ -885,6 +1036,10 @@ export const useGameStore = defineStore('game', () => {
     }
 
     dialog.value = null
+    if (pendingBattle.value?.kind === 'trainer') {
+      beginBattleTransition('trainer')
+      return
+    }
     gameState.value = 'ROAMING'
   }
 
@@ -892,10 +1047,12 @@ export const useGameStore = defineStore('game', () => {
     gameState,
     isLoading,
     player,
+    playerTrainer,
     currentMap,
     npcs,
     dialog,
     battle,
+    battleTransition,
     menuTab,
     bag,
     money,
@@ -923,5 +1080,6 @@ export const useGameStore = defineStore('game', () => {
     loadGame,
     bootstrap,
     chooseStarter,
+    chooseTrainer,
   }
 })

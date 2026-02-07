@@ -5,6 +5,8 @@ export const TILE = {
   WALL: 1,
   WATER: 2,
   PATH: 3,
+  BUSH: 4,
+  BRIDGE: 5,
 } as const
 
 export type TileId = (typeof TILE)[keyof typeof TILE]
@@ -14,9 +16,11 @@ export const TILE_COLORS: Record<TileId, string> = {
   [TILE.WALL]: '#5d4037',
   [TILE.WATER]: '#2196f3',
   [TILE.PATH]: '#c8a46b',
+  [TILE.BUSH]: '#3b8f3b',
+  [TILE.BRIDGE]: '#d7a25c',
 }
 
-export const WALKABLE_TILES = new Set<TileId>([TILE.GRASS, TILE.PATH])
+export const WALKABLE_TILES = new Set<TileId>([TILE.GRASS, TILE.PATH, TILE.BUSH, TILE.BRIDGE])
 
 export type NpcData = {
   id: string

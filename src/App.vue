@@ -9,11 +9,19 @@ import GameMenu from './components/GameMenu.vue'
 import StarterSelect from './components/StarterSelect.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
 import ShopMenu from './components/ShopMenu.vue'
+import TrainerSelect from './components/TrainerSelect.vue'
+import BattleTransition from './components/BattleTransition.vue'
 
 const store = useGameStore()
 
 const handleKeydown = (e: KeyboardEvent) => {
-  if (store.isLoading || store.gameState === 'STARTER') return
+  if (
+    store.isLoading ||
+    store.gameState === 'STARTER' ||
+    store.gameState === 'TRAINER_SELECT' ||
+    store.gameState === 'TRANSITION'
+  )
+    return
 
   if (store.gameState === 'DIALOG') {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -91,6 +99,8 @@ onUnmounted(() => {
       <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
       <p v-else-if="store.gameState === 'MENU'">Menu</p>
       <p v-else-if="store.gameState === 'STARTER'">Choose your starter</p>
+      <p v-else-if="store.gameState === 'TRAINER_SELECT'">Choose your trainer</p>
+      <p v-else-if="store.gameState === 'TRANSITION'">Encounter!</p>
       <p v-else-if="store.gameState === 'SHOP'">Shop</p>
       <p v-else>Battle Mode!</p>
     </div>
@@ -109,8 +119,10 @@ onUnmounted(() => {
     <DialogBox v-if="store.gameState === 'DIALOG' && store.dialog" :dialog="store.dialog" />
     <GameMenu v-if="store.gameState === 'MENU'" />
     <ShopMenu v-if="store.gameState === 'SHOP'" />
+    <TrainerSelect v-if="store.gameState === 'TRAINER_SELECT'" />
     <StarterSelect v-if="store.gameState === 'STARTER'" />
     <LoadingOverlay v-if="store.isLoading" />
+    <BattleTransition v-if="store.battleTransition" :kind="store.battleTransition.kind" />
   </main>
 </template>
 

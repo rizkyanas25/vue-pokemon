@@ -14,3 +14,24 @@ export const TRAINER_SPRITES = [
 ] as const
 
 export type TrainerSpriteId = (typeof TRAINER_SPRITES)[number]
+
+export type PlayerTrainerId = 'male' | 'female'
+
+export type PlayerTrainer = {
+  id: PlayerTrainerId
+  name: string
+  sprite: string
+}
+
+export const PLAYER_TRAINERS: Record<PlayerTrainerId, PlayerTrainer> = {
+  male: {
+    id: 'male',
+    name: 'Male Trainer',
+    sprite: trainerSprite('backpacker'),
+  },
+  female: {
+    id: 'female',
+    name: 'Female Trainer',
+    sprite: trainerSprite('beauty'),
+  },
+}

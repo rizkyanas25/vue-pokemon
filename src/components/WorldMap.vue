@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useGameStore } from '../stores/gameStore'
-import { TILE_COLORS, type TileId } from '../constants/game'
+import { TILE, TILE_COLORS, type TileId } from '../constants/game'
 import { TileSizeKey } from '../constants/injectKeys'
 import NpcCharacter from './NpcCharacter.vue'
 import { computed, ref, onMounted, onUnmounted, provide } from 'vue'
@@ -34,6 +34,29 @@ const mapStyle = computed(() => ({
 }))
 
 const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
+
+const getTileStyle = (tile: TileId, width: number, height: number) => {
+  const style: Record<string, string> = {
+    width: `${width}px`,
+    height: `${height}px`,
+    backgroundColor: getTileColor(tile),
+  }
+
+  if (tile === TILE.BUSH) {
+    style.backgroundImage = "url('/sprites/bush-sprite.png')"
+    style.backgroundSize = 'cover'
+    style.backgroundRepeat = 'no-repeat'
+    style.backgroundPosition = 'center'
+  }
+
+  if (tile === TILE.BRIDGE) {
+    style.backgroundImage =
+      'linear-gradient(90deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0) 20%, rgba(0,0,0,0.15) 40%, rgba(0,0,0,0) 60%, rgba(0,0,0,0.15) 80%, rgba(0,0,0,0) 100%)'
+    style.backgroundSize = '24px 100%'
+  }
+
+  return style
+}
 </script>
 
 <template>
@@ -44,17 +67,14 @@ const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
           v-for="(tile, x) in row"
           :key="`${x}-${y}`"
           class="tile"
-          :style="{
-            width: `${tileSize.width}px`,
-            height: `${tileSize.height}px`,
-            backgroundColor: getTileColor(tile),
-          }"
+          :style="getTileStyle(tile, tileSize.width, tileSize.height)"
         >
           <!-- Optional: Render tile image here if we had them -->
-          <span v-if="tile === 0" class="grass-detail">.</span>
-          <span v-if="tile === 1" class="wall-detail">#</span>
-          <span v-if="tile === 2" class="water-detail">~</span>
-          <span v-if="tile === 3" class="path-detail">=</span>
+          <span v-if="tile === TILE.GRASS" class="grass-detail">.</span>
+          <span v-if="tile === TILE.WALL" class="wall-detail">#</span>
+          <span v-if="tile === TILE.WATER" class="water-detail">~</span>
+          <span v-if="tile === TILE.PATH" class="path-detail">=</span>
+          <span v-if="tile === TILE.BRIDGE" class="path-detail">=</span>
         </div>
       </div>
 

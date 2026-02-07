@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getMoveData } from '../data/battle/moves'
 import { applyExperience, resetBattleStages } from '../engine/pokemon'
@@ -22,6 +22,7 @@ import squirtleImg from '@/assets/sprites/squirtle.png'
 type UiState = 'INPUT' | 'MESSAGE'
 type PendingEnd = 'WIN' | 'LOSE' | 'RUN' | null
 type MenuMode = 'MAIN' | 'BAG' | 'PARTY'
+type MainSection = 'moves' | 'utility'
 
 const store = useGameStore()
 
@@ -30,6 +31,7 @@ const enemyPokemon = computed(() => store.battle?.enemy ?? null)
 const trainerSprite = computed(() => store.battle?.trainerSprite ?? '')
 const trainerName = computed(() => store.battle?.trainerName ?? 'Trainer')
 const isTrainerBattle = computed(() => Boolean(store.battle?.trainerId))
+const playerTrainerSprite = computed(() => store.playerTrainer?.sprite ?? '')
 
 const spriteMap: Record<string, string> = {
   pikachu: pikachuImg,
@@ -41,8 +43,20 @@ const spriteMap: Record<string, string> = {
 const uiState = ref<UiState>('MESSAGE')
 const pendingEnd = ref<PendingEnd>(null)
 const menuMode = ref<MenuMode>('MAIN')
+const mainSection = ref<MainSection>('moves')
+const selectedMoveIndex = ref(0)
+const selectedUtilityIndex = ref(0)
+const selectedBagIndex = ref(0)
+const selectedPartyIndex = ref(0)
 const messageQueue = ref<string[]>([])
 const currentMessage = ref('')
+
+const movesList = computed(() => playerPokemon.value?.moves ?? [])
+
+const clampIndex = (value: number, max: number) => {
+  if (max <= 0) return 0
+  return Math.min(Math.max(value, 0), max - 1)
+}
 
 const queueMessages = (messages: string[]) => {
   const filtered = messages.filter(Boolean)
@@ -65,6 +79,7 @@ const showNextMessage = () => {
   } else {
     uiState.value = 'INPUT'
     menuMode.value = 'MAIN'
+    mainSection.value = 'moves'
   }
 }
 
@@ -86,7 +101,17 @@ const hpPercent = (pokemon: PokemonInstance | null) => {
 }
 
 const playerStatus = computed(() => getStatusLabel(playerPokemon.value.status))
-const enemyStatus = computed(() => (enemyPokemon.value ? getStatusLabel(enemyPokemon.value.status) : ''))
+const enemyStatus = computed(() =>
+  enemyPokemon.value ? getStatusLabel(enemyPokemon.value.status) : '',
+)
+
+const getTypes = (pokemon: PokemonInstance | null) => {
+  const types = pokemon?.species?.types ?? []
+  return types.length ? types : ['unknown']
+}
+
+const playerTypes = computed(() => getTypes(playerPokemon.value))
+const enemyTypes = computed(() => getTypes(enemyPokemon.value))
 
 const battleBackgroundStyle = computed(() => {
   const terrain = store.battle?.terrain ?? 'grass'
@@ -125,9 +150,7 @@ const resolveTurn = (playerMoveState: MoveState) => {
 
   const actions = [
     { actor: player, target: enemy, move: playerMove, moveState: playerMoveState },
-    enemyMove
-      ? { actor: enemy, target: player, move: enemyMove, moveState: enemyMoveState }
-      : null,
+    enemyMove ? { actor: enemy, target: player, move: enemyMove, moveState: enemyMoveState } : null,
   ].filter(Boolean) as Array<{
     actor: PokemonInstance
     target: PokemonInstance
@@ -259,6 +282,7 @@ const openParty = () => {
 
 const backToMain = () => {
   menuMode.value = 'MAIN'
+  mainSection.value = 'moves'
 }
 
 const useBattleItem = (itemId: ItemId) => {
@@ -310,6 +334,141 @@ const finishBattle = () => {
   store.endBattle(result)
 }
 
+const handleMoveNavigation = (key: string) => {
+  const moveCount = movesList.value.length
+  if (moveCount === 0) return
+
+  const columns = 2
+  const rows = Math.ceil(moveCount / columns)
+  let row = Math.floor(selectedMoveIndex.value / columns)
+  let col = selectedMoveIndex.value % columns
+
+  if (key === 'ArrowLeft') col = Math.max(0, col - 1)
+  if (key === 'ArrowRight') col = Math.min(columns - 1, col + 1)
+  if (key === 'ArrowUp') row = Math.max(0, row - 1)
+  if (key === 'ArrowDown') {
+    if (row < rows - 1) {
+      row += 1
+    } else {
+      mainSection.value = 'utility'
+      return
+    }
+  }
+
+  const nextIndex = row * columns + col
+  selectedMoveIndex.value = nextIndex >= moveCount ? moveCount - 1 : nextIndex
+}
+
+const handleUtilityNavigation = (key: string) => {
+  const max = 3
+  if (key === 'ArrowLeft') selectedUtilityIndex.value = clampIndex(selectedUtilityIndex.value - 1, max)
+  if (key === 'ArrowRight') selectedUtilityIndex.value = clampIndex(selectedUtilityIndex.value + 1, max)
+  if (key === 'ArrowUp') mainSection.value = 'moves'
+}
+
+const handleGridNavigation = (
+  key: string,
+  count: number,
+  selected: { value: number },
+  columns = 2,
+) => {
+  if (count === 0) return
+  const rows = Math.ceil(count / columns)
+  let row = Math.floor(selected.value / columns)
+  let col = selected.value % columns
+
+  if (key === 'ArrowLeft') col = Math.max(0, col - 1)
+  if (key === 'ArrowRight') col = Math.min(columns - 1, col + 1)
+  if (key === 'ArrowUp') row = Math.max(0, row - 1)
+  if (key === 'ArrowDown') row = Math.min(rows - 1, row + 1)
+
+  const nextIndex = row * columns + col
+  selected.value = nextIndex >= count ? count - 1 : nextIndex
+}
+
+const handleBattleKeydown = (e: KeyboardEvent) => {
+  if (store.gameState !== 'BATTLE') return
+
+  const key = e.key
+  const isArrow = key.startsWith('Arrow')
+  const isConfirm = key === 'Enter' || key === ' '
+  const isCancel = key === 'Escape' || key === 'Backspace'
+
+  if (isArrow || isConfirm || isCancel) {
+    e.preventDefault()
+  }
+
+  if (uiState.value === 'MESSAGE') {
+    if (isConfirm) advanceMessage()
+    return
+  }
+
+  if (menuMode.value === 'MAIN') {
+    if (isArrow) {
+      if (mainSection.value === 'moves') handleMoveNavigation(key)
+      else handleUtilityNavigation(key)
+      return
+    }
+    if (isConfirm) {
+      if (mainSection.value === 'moves') {
+        const move = movesList.value[selectedMoveIndex.value]
+        if (move) selectMove(move)
+      } else {
+        if (selectedUtilityIndex.value === 0) openBag()
+        if (selectedUtilityIndex.value === 1) openParty()
+        if (selectedUtilityIndex.value === 2) run()
+      }
+    }
+    return
+  }
+
+  if (menuMode.value === 'BAG') {
+    if (isArrow) {
+      handleGridNavigation(key, store.bag.length, selectedBagIndex)
+      return
+    }
+    if (isConfirm && store.bag[selectedBagIndex.value]) {
+      useBattleItem(store.bag[selectedBagIndex.value].id)
+      return
+    }
+    if (isCancel) backToMain()
+    return
+  }
+
+  if (menuMode.value === 'PARTY') {
+    if (isArrow) {
+      handleGridNavigation(key, store.player.party.length, selectedPartyIndex)
+      return
+    }
+    if (isConfirm) {
+      switchPokemon(selectedPartyIndex.value)
+      return
+    }
+    if (isCancel) backToMain()
+  }
+}
+
+watch(menuMode, (mode) => {
+  if (mode === 'MAIN') {
+    mainSection.value = 'moves'
+    selectedMoveIndex.value = clampIndex(selectedMoveIndex.value, movesList.value.length)
+  }
+  if (mode === 'BAG') selectedBagIndex.value = 0
+  if (mode === 'PARTY') selectedPartyIndex.value = 0
+})
+
+watch(movesList, (list) => {
+  selectedMoveIndex.value = clampIndex(selectedMoveIndex.value, list.length)
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', handleBattleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleBattleKeydown)
+})
+
 onMounted(() => {
   const enemy = enemyPokemon.value
   const player = playerPokemon.value
@@ -317,7 +476,10 @@ onMounted(() => {
   if (enemy) resetBattleStages(enemy)
   if (enemy) {
     if (isTrainerBattle.value) {
-      queueMessages([`${trainerName.value} wants to battle!`, `${trainerName.value} sent out ${enemy.name}!`])
+      queueMessages([
+        `${trainerName.value} wants to battle!`,
+        `${trainerName.value} sent out ${enemy.name}!`,
+      ])
     } else {
       queueMessages([`A wild ${enemy.name} appeared!`])
     }
@@ -332,6 +494,16 @@ onMounted(() => {
         <div class="name">
           {{ enemyPokemon.name }} Lv{{ enemyPokemon.level }}
           <span v-if="enemyStatus" class="status">{{ enemyStatus }}</span>
+        </div>
+        <div class="types">
+          <span
+            v-for="type in enemyTypes"
+            :key="type"
+            class="type-badge"
+            :class="`type-${type}`"
+          >
+            {{ type === 'unknown' ? '???' : type.toUpperCase() }}
+          </span>
         </div>
         <div class="hp-bar">
           <div class="hp-fill" :style="{ width: `${hpPercent(enemyPokemon)}%` }"></div>
@@ -351,10 +523,27 @@ onMounted(() => {
         <div v-else class="sprite-placeholder"></div>
       </div>
 
+      <img
+        v-if="playerTrainerSprite"
+        class="player-trainer-sprite"
+        :src="playerTrainerSprite"
+        alt="Player Trainer"
+      />
+
       <div class="hud player-hud">
         <div class="name">
           {{ playerPokemon.name }} Lv{{ playerPokemon.level }}
           <span v-if="playerStatus" class="status">{{ playerStatus }}</span>
+        </div>
+        <div class="types">
+          <span
+            v-for="type in playerTypes"
+            :key="type"
+            class="type-badge"
+            :class="`type-${type}`"
+          >
+            {{ type === 'unknown' ? '???' : type.toUpperCase() }}
+          </span>
         </div>
         <div class="hp-bar">
           <div class="hp-fill" :style="{ width: `${hpPercent(playerPokemon)}%` }"></div>
@@ -366,7 +555,7 @@ onMounted(() => {
     <div
       class="battle-menu"
       :class="{ clickable: uiState === 'MESSAGE' }"
-      @click="uiState === 'MESSAGE' && advanceMessage()"
+      @click.self="uiState === 'MESSAGE' && advanceMessage()"
     >
       <div class="battle-text" v-if="uiState === 'MESSAGE'" @click="advanceMessage">
         {{ currentMessage }}
@@ -376,9 +565,15 @@ onMounted(() => {
         <template v-if="menuMode === 'MAIN'">
           <div class="moves">
             <button
-              v-for="moveState in playerPokemon.moves"
+              v-for="(moveState, moveIndex) in playerPokemon.moves"
               :key="moveState.id"
               class="move-button"
+              :class="{
+                'is-active':
+                  menuMode === 'MAIN' &&
+                  mainSection === 'moves' &&
+                  selectedMoveIndex === moveIndex,
+              }"
               :disabled="moveState.pp <= 0"
               @click="selectMove(moveState)"
             >
@@ -390,9 +585,24 @@ onMounted(() => {
             </button>
           </div>
           <div class="utility">
-            <button @click="openBag">BAG</button>
-            <button @click="openParty">POKEMON</button>
-            <button @click="run">RUN</button>
+            <button
+              :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 0 }"
+              @click="openBag"
+            >
+              BAG
+            </button>
+            <button
+              :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 1 }"
+              @click="openParty"
+            >
+              POKEMON
+            </button>
+            <button
+              :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 2 }"
+              @click="run"
+            >
+              RUN
+            </button>
           </div>
         </template>
 
@@ -400,15 +610,14 @@ onMounted(() => {
           <div class="bag-menu">
             <div v-if="store.bag.length === 0" class="menu-empty">Bag is empty.</div>
             <button
-              v-for="item in store.bag"
+              v-for="(item, itemIndex) in store.bag"
               :key="item.id"
               class="bag-item"
+              :class="{ 'is-active': selectedBagIndex === itemIndex }"
               @click="useBattleItem(item.id)"
             >
               <div class="bag-name">{{ ITEM_CATALOG[item.id]?.name ?? item.id }}</div>
-              <div class="bag-meta">
-                x{{ item.qty }} · ₽{{ ITEM_CATALOG[item.id]?.price ?? 0 }}
-              </div>
+              <div class="bag-meta">x{{ item.qty }} · ₽{{ ITEM_CATALOG[item.id]?.price ?? 0 }}</div>
             </button>
           </div>
           <div class="utility">
@@ -422,13 +631,12 @@ onMounted(() => {
               v-for="(member, index) in store.player.party"
               :key="member.id"
               class="party-item"
+              :class="{ 'is-active': selectedPartyIndex === index }"
               :disabled="member.currentHp <= 0"
               @click="switchPokemon(index)"
             >
               <div class="party-name">{{ member.name }} Lv{{ member.level }}</div>
-              <div class="party-meta">
-                HP {{ member.currentHp }} / {{ member.stats.hp }}
-              </div>
+              <div class="party-meta">HP {{ member.currentHp }} / {{ member.stats.hp }}</div>
             </button>
           </div>
           <div class="utility">
@@ -454,7 +662,6 @@ onMounted(() => {
   background-color: #f8f8f8;
 }
 
-
 .battle-arena {
   flex: 1;
   position: relative;
@@ -471,10 +678,20 @@ onMounted(() => {
 .trainer-sprite {
   position: absolute;
   top: 20px;
-  right: 140px;
+  right: 40px;
   width: 140px;
   image-rendering: pixelated;
   opacity: 0.9;
+  z-index: 1;
+}
+
+.player-trainer-sprite {
+  position: absolute;
+  bottom: 10px;
+  left: 40px;
+  width: 140px;
+  image-rendering: pixelated;
+  opacity: 0.95;
   z-index: 1;
 }
 
@@ -488,14 +705,15 @@ onMounted(() => {
 
 .enemy-sprite {
   top: 40px;
-  right: 40px;
+  right: 140px;
   z-index: 2;
 }
 
 .player-sprite {
   bottom: 20px;
-  left: 40px;
+  left: 140px;
   transform: scaleX(-1);
+  z-index: 2;
 }
 
 .hud {
@@ -523,6 +741,43 @@ onMounted(() => {
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+.types {
+  margin-top: 4px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.type-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  color: #111;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  text-transform: uppercase;
+  background: #ddd;
+}
+
+.type-normal { background: #a8a878; }
+.type-fire { background: #f08030; }
+.type-water { background: #6890f0; color: #fff; }
+.type-electric { background: #f8d030; }
+.type-grass { background: #78c850; }
+.type-ice { background: #98d8d8; }
+.type-fighting { background: #c03028; color: #fff; }
+.type-poison { background: #a040a0; color: #fff; }
+.type-ground { background: #e0c068; }
+.type-flying { background: #a890f0; }
+.type-psychic { background: #f85888; color: #fff; }
+.type-bug { background: #a8b820; }
+.type-rock { background: #b8a038; }
+.type-ghost { background: #705898; color: #fff; }
+.type-dragon { background: #7038f8; color: #fff; }
+.type-dark { background: #705848; color: #fff; }
+.type-steel { background: #b8b8d0; }
+.type-fairy { background: #ee99ac; }
+.type-unknown { background: #999; color: #fff; }
 
 .enemy-hud {
   top: 20px;
@@ -647,6 +902,14 @@ onMounted(() => {
 .move-button:hover:not(:disabled) {
   background: #eee;
   border-color: #f00;
+}
+
+.move-button.is-active,
+.utility button.is-active,
+.bag-item.is-active,
+.party-item.is-active {
+  border-color: #ffd166;
+  box-shadow: 0 0 0 2px rgba(255, 209, 102, 0.4);
 }
 
 .move-name {

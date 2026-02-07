@@ -19,6 +19,7 @@ const spriteMap: Record<string, string> = {
 }
 
 const activeSprite = computed(() => {
+  if (store.playerTrainer?.sprite) return store.playerTrainer.sprite
   const active = store.player.party[store.player.activeIndex]
   if (!active) return pikachuImg
   if (active.species.sprite) return active.species.sprite

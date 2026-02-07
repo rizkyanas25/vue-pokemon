@@ -2,20 +2,20 @@ import { TILE, type TileId, type NpcData } from '../constants/game'
 import { trainerSprite } from './trainers'
 
 const MAP_TEMPLATE = [
-  '......................',
-  '.......====...........',
-  '.......====....~~~~...',
-  '.......====....~~~~...',
-  '......................',
-  '...######......######.',
-  '...#....#........#....',
+  '....bbbb......bbbb....',
+  '....bbbb====..bbbbb...',
+  '....bbbb====..~~B~..b.',
+  '....bbbb====..~~B~....',
+  '..bbbbb........bbbbb..',
+  '...######..bbb.######.',
+  '...#....#..bbb...#....',
   '...#....#....==..#....',
-  '...######....==..####.',
-  '...............==.....',
-  '.....~~~~.............',
-  '.....~~~~...####......',
-  '...........==.........',
-  '......................',
+  '...######..bb==..####.',
+  '....bbbbb.....==..bbb.',
+  '....~~B~..bbb.........',
+  '....~~B~..b..####.....',
+  '....bbb....==.....bbb.',
+  '....bbbb........bbbb..',
 ]
 
 const LEGEND: Record<string, TileId> = {
@@ -23,6 +23,8 @@ const LEGEND: Record<string, TileId> = {
   '.': TILE.GRASS,
   '~': TILE.WATER,
   '=': TILE.PATH,
+  'b': TILE.BUSH,
+  'B': TILE.BRIDGE,
 }
 
 const parseMap = (rows: string[]): TileId[][] => {
@@ -75,7 +77,7 @@ export const overworldNpcs: NpcData[] = [
   {
     id: 'merchant',
     name: 'Poke Mart',
-    x: 10,
+    x: 11,
     y: 11,
     sprite: '/sprites/Poke_Mart_FRLG.png',
     shopId: 'general',
