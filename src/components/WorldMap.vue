@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { useGameStore } from '../stores/gameStore'
 import { TILE_SIZE, TILE_COLORS, type TileId } from '../constants/game'
+import { TileSizeKey } from '../constants/injectKeys'
 import NpcCharacter from './NpcCharacter.vue'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, provide } from 'vue'
 
 const store = useGameStore()
 const windowSize = ref({ width: window.innerWidth, height: window.innerHeight })
@@ -14,28 +15,24 @@ const updateSize = () => {
 onMounted(() => window.addEventListener('resize', updateSize))
 onUnmounted(() => window.removeEventListener('resize', updateSize))
 
-// Calculate camera position to center player
-const cameraTransform = computed(() => {
-  const centerX = windowSize.value.width / 2
-  const centerY = windowSize.value.height / 2
+const mapWidth = computed(() => store.currentMap?.[0]?.length ?? 1)
+const mapHeight = computed(() => store.currentMap?.length ?? 1)
 
-  // Player position in pixels (center of tile)
-  const playerPxX = store.player.x * TILE_SIZE + TILE_SIZE / 2
-  const playerPxY = store.player.y * TILE_SIZE + TILE_SIZE / 2
-
-  const translateX = centerX - playerPxX
-  const translateY = centerY - playerPxY
-
-  return `translate(${translateX}px, ${translateY}px)`
+const tileSize = computed(() => {
+  const raw = Math.floor(
+    Math.min(windowSize.value.width / mapWidth.value, windowSize.value.height / mapHeight.value),
+  )
+  return Math.max(24, raw || TILE_SIZE)
 })
+
+provide(TileSizeKey, tileSize)
 
 const mapStyle = computed(() => ({
   display: 'grid',
-  gridTemplateColumns: `repeat(${store.currentMap?.[0]?.length || 0}, ${TILE_SIZE}px)`,
-  width: 'fit-content',
-  transform: cameraTransform.value,
-  transition: 'transform 0.2s linear', // smooth camera follow matched to player speed
-  willChange: 'transform',
+  gridTemplateColumns: `repeat(${mapWidth.value}, ${tileSize.value}px)`,
+  gridTemplateRows: `repeat(${mapHeight.value}, ${tileSize.value}px)`,
+  width: `${mapWidth.value * tileSize.value}px`,
+  height: `${mapHeight.value * tileSize.value}px`,
 }))
 
 const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
@@ -50,8 +47,8 @@ const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
           :key="`${x}-${y}`"
           class="tile"
           :style="{
-            width: `${TILE_SIZE}px`,
-            height: `${TILE_SIZE}px`,
+            width: `${tileSize}px`,
+            height: `${tileSize}px`,
             backgroundColor: getTileColor(tile),
           }"
         >
@@ -76,6 +73,9 @@ const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
   overflow: hidden;
   background: #000;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .map-row {

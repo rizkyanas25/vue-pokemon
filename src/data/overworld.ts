@@ -56,6 +56,7 @@ export const overworldNpcs: NpcData[] = [
     name: 'Mom',
     x: 6,
     y: 4,
+    pokemonId: 113,
     dialog: [
       'Morning! Your adventure starts here.',
       'Check your Bag often.',
@@ -68,6 +69,7 @@ export const overworldNpcs: NpcData[] = [
     name: 'Ranger',
     x: 13,
     y: 7,
+    pokemonId: 58,
     dialog: [
       'Watch the tall grass.',
       'Wild Pokemon hide there.',
@@ -79,6 +81,7 @@ export const overworldNpcs: NpcData[] = [
     name: 'Kid',
     x: 15,
     y: 9,
+    pokemonId: 133,
     dialog: [
       'I saw something shiny by the water!',
       'Maybe it was a Pokemon?',

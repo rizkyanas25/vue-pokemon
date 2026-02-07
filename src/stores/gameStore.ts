@@ -53,6 +53,7 @@ export const useGameStore = defineStore('game', () => {
 
   const battle = ref<{ enemy: PokemonInstance } | null>(null)
   const menuTab = ref<MenuTab>('party')
+  const npcSprites = ref<Record<string, string | null>>({})
   const bag = ref<BagItem[]>([
     { id: 'potion', name: 'Potion', description: 'Heals 20 HP.', qty: 3 },
     { id: 'pokeball', name: 'Poke Ball', description: 'A device for catching wild Pokemon.', qty: 5 },
@@ -71,6 +72,28 @@ export const useGameStore = defineStore('game', () => {
 
   const cacheSpecies = (species: PokemonSpecies) => {
     speciesCache.value[species.key] = species
+  }
+
+  const ensureNpcSprite = async (npc: NpcData) => {
+    if (npc.sprite) {
+      npcSprites.value[npc.id] = npc.sprite
+      return
+    }
+
+    if (npcSprites.value[npc.id] !== undefined) return
+
+    const lookup = npc.pokemonId ?? npc.pokemonKey
+    if (!lookup) {
+      npcSprites.value[npc.id] = null
+      return
+    }
+
+    try {
+      const species = await ensureSpecies(lookup)
+      npcSprites.value[npc.id] = species.sprite ?? null
+    } catch {
+      npcSprites.value[npc.id] = null
+    }
   }
 
   const getStarterByKey = (key: string) =>
@@ -464,6 +487,7 @@ export const useGameStore = defineStore('game', () => {
     bag,
     pokedex,
     speciesCache,
+    npcSprites,
     hasSaveData,
     lastSaved,
     movePlayer,
@@ -473,6 +497,7 @@ export const useGameStore = defineStore('game', () => {
     advanceDialog,
     startWildBattle,
     endBattle,
+    ensureNpcSprite,
     openMenu,
     closeMenu,
     setMenuTab,

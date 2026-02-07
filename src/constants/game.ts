@@ -25,4 +25,7 @@ export type NpcData = {
   y: number
   dialog: string[]
   color?: string
+  sprite?: string | null
+  pokemonId?: number
+  pokemonKey?: string
 }

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { useGameStore } from '../stores/gameStore'
 import { TILE_SIZE } from '../constants/game'
-import { computed } from 'vue'
+import { TileSizeKey } from '../constants/injectKeys'
+import { computed, inject } from 'vue'
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
 import charmanderImg from '@/assets/sprites/charmander.png'
 import squirtleImg from '@/assets/sprites/squirtle.png'
 
 const store = useGameStore()
+const tileSize = inject(TileSizeKey, computed(() => TILE_SIZE))
 
 const spriteMap: Record<string, string> = {
   pikachu: pikachuImg,
@@ -24,9 +26,9 @@ const activeSprite = computed(() => {
 })
 
 const playerStyle = computed(() => ({
-  width: `${TILE_SIZE}px`,
-  height: `${TILE_SIZE}px`,
-  transform: `translate(${store.player.x * TILE_SIZE}px, ${store.player.y * TILE_SIZE}px)`,
+  width: `${tileSize.value}px`,
+  height: `${tileSize.value}px`,
+  transform: `translate(${store.player.x * tileSize.value}px, ${store.player.y * tileSize.value}px)`,
   backgroundImage: `url(${activeSprite.value})`,
   backgroundSize: 'contain',
   backgroundRepeat: 'no-repeat',
