@@ -75,23 +75,29 @@ body {
 }
 
 .game-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: block; /* Removed flex center */
+  width: 100vw;
   height: 100vh;
+  position: relative;
 }
 
 .ui-overlay {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
   text-align: center;
-  margin-bottom: 20px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 10px;
+  border-radius: 8px;
+  pointer-events: none; /* Allow clicking through to map if needed */
 }
 
 .viewport {
-  border: 4px solid #fff;
-  border-radius: 4px;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
-  /* Simulate gameboy screen size? or larger */
   background-color: #000;
 }
 </style>

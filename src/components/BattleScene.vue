@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
 
 const store = useGameStore()
 
-// Mock checking for "wild pokemon"
-// In a real app this would come from the store's encounter data
 const enemy = ref({
   name: 'Wild Bulbasaur',
   maxHp: 20,
@@ -22,55 +20,92 @@ const playerPokemon = ref({
   sprite: pikachuImg,
 })
 
+// Battle State Machine
+type BattleState =
+  | 'PLAYER_INPUT'
+  | 'PLAYER_ATTACK_ANIM'
+  | 'ENEMY_TURN'
+  | 'ENEMY_ATTACK_ANIM'
+  | 'WIN'
+  | 'LOSE'
+  | 'RUN'
+
+const battleState = ref<BattleState>('PLAYER_INPUT')
 const battleLog = ref('A wild Pokemon appeared!')
-const isPlayerTurn = ref(true)
+
+// Computed to show menu or text
+const showMenu = computed(() => battleState.value === 'PLAYER_INPUT' && battleLog.value === '')
 
 const attack = () => {
-  if (!isPlayerTurn.value) return
+  if (battleState.value !== 'PLAYER_INPUT') return
 
   // Player attacks
   const damage = Math.floor(Math.random() * 5) + 2
   enemy.value.hp = Math.max(0, enemy.value.hp - damage)
-  battleLog.value = `Pikachu used Thunder Shock! Dealt ${damage} damage.`
-  isPlayerTurn.value = false
+  battleLog.value = `${playerPokemon.value.name} used Thunder Shock!`
 
   if (enemy.value.hp <= 0) {
-    setTimeout(() => endBattle(true), 1500)
+    battleState.value = 'WIN'
   } else {
-    setTimeout(enemyTurn, 1500)
-  }
-}
-
-const enemyTurn = () => {
-  const damage = Math.floor(Math.random() * 4) + 1
-  playerPokemon.value.hp = Math.max(0, playerPokemon.value.hp - damage)
-  battleLog.value = `Wild pokemon used Tackle! Dealt ${damage} damage.`
-  isPlayerTurn.value = true
-
-  if (playerPokemon.value.hp <= 0) {
-    setTimeout(() => endBattle(false), 1500)
+    battleState.value = 'PLAYER_ATTACK_ANIM' // Waiting for user to click text
   }
 }
 
 const run = () => {
   battleLog.value = 'Got away safely!'
-  setTimeout(() => {
-    store.gameState = 'ROAMING'
-  }, 1000)
+  battleState.value = 'RUN'
 }
 
-const endBattle = (win: boolean) => {
-  if (win) {
-    battleLog.value = 'Enemy fainted! You won!'
-  } else {
-    battleLog.value = 'Pikachu fainted! You whited out...'
+const nextText = () => {
+  if (battleLog.value === '') return
+
+  // Clear current text
+  battleLog.value = ''
+
+  // Handle state transitions based on what just happened
+  if (battleState.value === 'PLAYER_ATTACK_ANIM') {
+    // Pokemon took damage text?
+    battleLog.value = `Dealt damage!`
+    battleState.value = 'ENEMY_TURN'
+    return
   }
-  setTimeout(() => {
-    // Heal for now
-    playerPokemon.value.hp = playerPokemon.value.maxHp
-    // Back to map
+
+  if (battleState.value === 'ENEMY_TURN') {
+    const damage = Math.floor(Math.random() * 4) + 1
+    playerPokemon.value.hp = Math.max(0, playerPokemon.value.hp - damage)
+    battleLog.value = `${enemy.value.name} used Tackle!`
+
+    if (playerPokemon.value.hp <= 0) {
+      battleState.value = 'LOSE'
+    } else {
+      battleState.value = 'ENEMY_ATTACK_ANIM'
+    }
+    return
+  }
+
+  if (battleState.value === 'ENEMY_ATTACK_ANIM') {
+    battleLog.value = `Took damage!`
+    battleState.value = 'PLAYER_INPUT' // Back to menu
+    return
+  }
+
+  if (battleState.value === 'WIN') {
+    battleLog.value = 'Enemy fainted! You won!'
+    // Next click exits
+    setTimeout(() => (store.gameState = 'ROAMING'), 1000)
+  }
+
+  if (battleState.value === 'LOSE') {
+    battleLog.value = 'You fainted...'
+    setTimeout(() => {
+      playerPokemon.value.hp = playerPokemon.value.maxHp
+      store.gameState = 'ROAMING'
+    }, 1000)
+  }
+
+  if (battleState.value === 'RUN') {
     store.gameState = 'ROAMING'
-  }, 2000)
+  }
 }
 </script>
 
@@ -83,6 +118,7 @@ const endBattle = (win: boolean) => {
         <div class="hp-bar">
           <div class="hp-fill" :style="{ width: `${(enemy.hp / enemy.maxHp) * 100}%` }"></div>
         </div>
+        <div class="hp-text">{{ enemy.hp }} / {{ enemy.maxHp }}</div>
       </div>
 
       <div class="sprite-container enemy-sprite">
@@ -109,8 +145,9 @@ const endBattle = (win: boolean) => {
 
     <!-- Dialog / Menu -->
     <div class="battle-menu">
-      <div class="battle-text" v-if="!isPlayerTurn || battleLog !== ''">
+      <div class="battle-text" v-if="!showMenu" @click="nextText" style="cursor: pointer">
         {{ battleLog }}
+        <span class="blinking-arrow">▼</span>
       </div>
       <div class="actions" v-else>
         <button @click="attack">FIGHT</button>
@@ -124,14 +161,16 @@ const endBattle = (win: boolean) => {
 
 <style scoped>
 .battle-scene {
-  width: 600px; /* Or variable */
-  height: 480px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   background-color: #f8f8f8;
-  border: 4px solid #333;
   display: flex;
   flex-direction: column;
   font-family: 'Press Start 2P', cursive;
-  position: relative;
+  z-index: 200; /* Above UI overlay */
   background-image: linear-gradient(to bottom, #d0f8d0 0%, #d0f8d0 50%, #70b870 50%, #70b870 100%);
 }
 
@@ -166,6 +205,7 @@ const endBattle = (win: boolean) => {
   border-radius: 4px;
   padding: 8px;
   width: 200px;
+  color: #000; /* Ensure text is visible */
 }
 
 .enemy-hud {
@@ -224,5 +264,23 @@ button:hover {
 .battle-text {
   font-size: 18px;
   line-height: 1.5;
+  position: relative;
+}
+
+.blinking-arrow {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 </style>
