@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useGameStore, type MenuTab } from '../stores/gameStore'
+import { ITEM_CATALOG } from '../data/items'
 
 const store = useGameStore()
 const actionMessage = ref('')
@@ -78,8 +79,8 @@ const doLoad = async () => {
         <div v-else-if="store.menuTab === 'bag'" class="bag-list">
           <div v-for="item in store.bag" :key="item.id" class="bag-item">
             <div class="bag-main">
-              <div class="bag-name">{{ item.name }}</div>
-              <div class="bag-desc">{{ item.description }}</div>
+              <div class="bag-name">{{ ITEM_CATALOG[item.id]?.name ?? item.id }}</div>
+              <div class="bag-desc">{{ ITEM_CATALOG[item.id]?.description ?? '' }}</div>
             </div>
             <div class="bag-qty">x{{ item.qty }}</div>
           </div>

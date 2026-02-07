@@ -8,6 +8,7 @@ import DialogBox from './components/DialogBox.vue'
 import GameMenu from './components/GameMenu.vue'
 import StarterSelect from './components/StarterSelect.vue'
 import LoadingOverlay from './components/LoadingOverlay.vue'
+import ShopMenu from './components/ShopMenu.vue'
 
 const store = useGameStore()
 
@@ -24,6 +25,13 @@ const handleKeydown = (e: KeyboardEvent) => {
   if (store.gameState === 'MENU') {
     if ((e.key === 'Escape' || e.key === 'm') && !e.repeat) {
       store.closeMenu()
+    }
+    return
+  }
+
+  if (store.gameState === 'SHOP') {
+    if ((e.key === 'Escape' || e.key === 'm') && !e.repeat) {
+      store.closeShop()
     }
     return
   }
@@ -83,6 +91,7 @@ onUnmounted(() => {
       <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
       <p v-else-if="store.gameState === 'MENU'">Menu</p>
       <p v-else-if="store.gameState === 'STARTER'">Choose your starter</p>
+      <p v-else-if="store.gameState === 'SHOP'">Shop</p>
       <p v-else>Battle Mode!</p>
     </div>
 
@@ -99,6 +108,7 @@ onUnmounted(() => {
 
     <DialogBox v-if="store.gameState === 'DIALOG' && store.dialog" :dialog="store.dialog" />
     <GameMenu v-if="store.gameState === 'MENU'" />
+    <ShopMenu v-if="store.gameState === 'SHOP'" />
     <StarterSelect v-if="store.gameState === 'STARTER'" />
     <LoadingOverlay v-if="store.isLoading" />
   </main>

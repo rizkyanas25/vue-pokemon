@@ -28,4 +28,5 @@ export type NpcData = {
   sprite?: string | null
   pokemonId?: number
   pokemonKey?: string
+  shopId?: string
 }

@@ -1,5 +1,9 @@
 @import './base.css';
 
+:root {
+  --battle-panel-height: 200px;
+}
+
 #app {
   width: 100vw;
   height: 100vh;

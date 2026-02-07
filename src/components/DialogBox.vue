@@ -29,6 +29,7 @@ const line = computed(() => props.dialog.lines[props.dialog.index] ?? '')
   right: 0;
   bottom: 0;
   padding: 16px;
+  height: var(--battle-panel-height);
   z-index: 300;
   display: flex;
   justify-content: center;
@@ -37,6 +38,7 @@ const line = computed(() => props.dialog.lines[props.dialog.index] ?? '')
 
 .dialog-box {
   width: min(900px, 96vw);
+  height: 100%;
   background: #1f1f1f;
   border: 3px solid #0f0f0f;
   border-radius: 6px;

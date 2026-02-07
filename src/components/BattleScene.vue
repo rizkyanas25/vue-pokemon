@@ -12,6 +12,7 @@ import {
   resolveMove,
 } from '../engine/battle'
 import type { MoveState, PokemonInstance } from '../engine/pokemon'
+import { ITEM_CATALOG, type ItemId } from '../data/items'
 
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
@@ -20,6 +21,7 @@ import squirtleImg from '@/assets/sprites/squirtle.png'
 
 type UiState = 'INPUT' | 'MESSAGE'
 type PendingEnd = 'WIN' | 'LOSE' | 'RUN' | null
+type MenuMode = 'MAIN' | 'BAG' | 'PARTY'
 
 const store = useGameStore()
 
@@ -35,6 +37,7 @@ const spriteMap: Record<string, string> = {
 
 const uiState = ref<UiState>('MESSAGE')
 const pendingEnd = ref<PendingEnd>(null)
+const menuMode = ref<MenuMode>('MAIN')
 const messageQueue = ref<string[]>([])
 const currentMessage = ref('')
 
@@ -58,6 +61,7 @@ const showNextMessage = () => {
     finishBattle()
   } else {
     uiState.value = 'INPUT'
+    menuMode.value = 'MAIN'
   }
 }
 
@@ -80,6 +84,26 @@ const hpPercent = (pokemon: PokemonInstance | null) => {
 
 const playerStatus = computed(() => getStatusLabel(playerPokemon.value.status))
 const enemyStatus = computed(() => (enemyPokemon.value ? getStatusLabel(enemyPokemon.value.status) : ''))
+
+const battleBackgroundStyle = computed(() => {
+  const terrain = store.battle?.terrain ?? 'grass'
+  if (terrain === 'water') {
+    return {
+      backgroundImage:
+        'linear-gradient(to bottom, #cfefff 0%, #cfefff 50%, #4a90e2 50%, #4a90e2 100%)',
+    }
+  }
+  if (terrain === 'default') {
+    return {
+      backgroundImage:
+        'linear-gradient(to bottom, #e5e5e5 0%, #e5e5e5 50%, #a0a0a0 50%, #a0a0a0 100%)',
+    }
+  }
+  return {
+    backgroundImage:
+      'linear-gradient(to bottom, #d0f8d0 0%, #d0f8d0 50%, #70b870 50%, #70b870 100%)',
+  }
+})
 
 const resolveTurn = (playerMoveState: MoveState) => {
   const player = playerPokemon.value
@@ -138,6 +162,9 @@ const resolveTurn = (playerMoveState: MoveState) => {
   if (enemy.currentHp <= 0) {
     const expGain = Math.floor((enemy.species.baseExp * enemy.level) / 7)
     messages.push(`${player.name} gained ${expGain} EXP!`)
+    const reward = Math.max(20, Math.floor(enemy.level * 15))
+    store.addMoney(reward)
+    messages.push(`You got ₽${reward}!`)
     const { levelsGained } = applyExperience(player, expGain)
     if (levelsGained > 0) {
       messages.push(`${player.name} grew to level ${player.level}!`)
@@ -172,6 +199,84 @@ const resolveTurn = (playerMoveState: MoveState) => {
 const selectMove = (moveState: MoveState) => {
   if (uiState.value !== 'INPUT') return
   resolveTurn(moveState)
+}
+
+const resolveEnemyTurn = (preMessages: string[]) => {
+  const player = playerPokemon.value
+  const enemy = enemyPokemon.value
+  if (!player || !enemy) return
+
+  const messages: string[] = [...preMessages]
+
+  const enemyMoveState = chooseMove(enemy)
+  if (enemyMoveState) {
+    const enemyMove = getMoveDataFromState(enemyMoveState)
+    messages.push(`${enemy.name} used ${enemyMove.name}!`)
+    const result = resolveMove(enemy, player, enemyMove)
+    messages.push(...result.messages)
+  } else {
+    messages.push(`${enemy.name} has no moves left!`)
+  }
+
+  if (player.currentHp <= 0) {
+    messages.push(`${player.name} fainted...`)
+    pendingEnd.value = 'LOSE'
+  } else {
+    const endMessages: string[] = []
+    const playerEnd = applyEndOfTurnStatus(player)
+    if (playerEnd.message) endMessages.push(playerEnd.message)
+    const enemyEnd = applyEndOfTurnStatus(enemy)
+    if (enemyEnd.message) endMessages.push(enemyEnd.message)
+
+    if (player.currentHp <= 0) {
+      endMessages.push(`${player.name} fainted...`)
+      pendingEnd.value = 'LOSE'
+    }
+    if (enemy.currentHp <= 0) {
+      endMessages.push(`${enemy.name} fainted!`)
+      pendingEnd.value = 'WIN'
+    }
+
+    messages.push(...endMessages)
+  }
+
+  uiState.value = 'MESSAGE'
+  queueMessages(messages)
+}
+
+const openBag = () => {
+  if (uiState.value !== 'INPUT') return
+  menuMode.value = 'BAG'
+}
+
+const openParty = () => {
+  if (uiState.value !== 'INPUT') return
+  menuMode.value = 'PARTY'
+}
+
+const backToMain = () => {
+  menuMode.value = 'MAIN'
+}
+
+const useBattleItem = (itemId: ItemId) => {
+  if (uiState.value !== 'INPUT') return
+  const message = store.useItem(itemId)
+  resolveEnemyTurn([message])
+  menuMode.value = 'MAIN'
+}
+
+const switchPokemon = (index: number) => {
+  if (uiState.value !== 'INPUT') return
+  const target = store.player.party[index]
+  if (!target || target.currentHp <= 0) {
+    queueMessages(['That Pokemon has no energy left!'])
+    return
+  }
+  if (index === store.player.activeIndex) return
+
+  store.setActiveParty(index)
+  resolveEnemyTurn([`Go, ${target.name}!`])
+  menuMode.value = 'MAIN'
 }
 
 const run = () => {
@@ -211,7 +316,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="battle-scene" v-if="enemyPokemon && playerPokemon">
+  <div class="battle-scene" :style="battleBackgroundStyle" v-if="enemyPokemon && playerPokemon">
     <div class="battle-arena">
       <div class="hud enemy-hud">
         <div class="name">
@@ -256,26 +361,68 @@ onMounted(() => {
         <span class="blinking-arrow">▼</span>
       </div>
       <div v-else class="menu">
-        <div class="moves">
-          <button
-            v-for="moveState in playerPokemon.moves"
-            :key="moveState.id"
-            class="move-button"
-            :disabled="moveState.pp <= 0"
-            @click="selectMove(moveState)"
-          >
-            <div class="move-name">{{ getMoveData(moveState.id).name }}</div>
-            <div class="move-meta">
-              PP {{ moveState.pp }}/{{ getMoveData(moveState.id).pp }} ·
-              {{ getMoveData(moveState.id).type.toUpperCase() }}
-            </div>
-          </button>
-        </div>
-        <div class="utility">
-          <button disabled>BAG</button>
-          <button disabled>POKEMON</button>
-          <button @click="run">RUN</button>
-        </div>
+        <template v-if="menuMode === 'MAIN'">
+          <div class="moves">
+            <button
+              v-for="moveState in playerPokemon.moves"
+              :key="moveState.id"
+              class="move-button"
+              :disabled="moveState.pp <= 0"
+              @click="selectMove(moveState)"
+            >
+              <div class="move-name">{{ getMoveData(moveState.id).name }}</div>
+              <div class="move-meta">
+                PP {{ moveState.pp }}/{{ getMoveData(moveState.id).pp }} ·
+                {{ getMoveData(moveState.id).type.toUpperCase() }}
+              </div>
+            </button>
+          </div>
+          <div class="utility">
+            <button @click="openBag">BAG</button>
+            <button @click="openParty">POKEMON</button>
+            <button @click="run">RUN</button>
+          </div>
+        </template>
+
+        <template v-else-if="menuMode === 'BAG'">
+          <div class="bag-menu">
+            <div v-if="store.bag.length === 0" class="menu-empty">Bag is empty.</div>
+            <button
+              v-for="item in store.bag"
+              :key="item.id"
+              class="bag-item"
+              @click="useBattleItem(item.id)"
+            >
+              <div class="bag-name">{{ ITEM_CATALOG[item.id]?.name ?? item.id }}</div>
+              <div class="bag-meta">
+                x{{ item.qty }} · ₽{{ ITEM_CATALOG[item.id]?.price ?? 0 }}
+              </div>
+            </button>
+          </div>
+          <div class="utility">
+            <button @click="backToMain">BACK</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="party-menu">
+            <button
+              v-for="(member, index) in store.player.party"
+              :key="member.id"
+              class="party-item"
+              :disabled="member.currentHp <= 0"
+              @click="switchPokemon(index)"
+            >
+              <div class="party-name">{{ member.name }} Lv{{ member.level }}</div>
+              <div class="party-meta">
+                HP {{ member.currentHp }} / {{ member.stats.hp }}
+              </div>
+            </button>
+          </div>
+          <div class="utility">
+            <button @click="backToMain">BACK</button>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -288,13 +435,13 @@ onMounted(() => {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: #f8f8f8;
   display: flex;
   flex-direction: column;
   font-family: 'Press Start 2P', cursive;
   z-index: 200;
-  background-image: linear-gradient(to bottom, #d0f8d0 0%, #d0f8d0 50%, #70b870 50%, #70b870 100%);
+  background-color: #f8f8f8;
 }
+
 
 .battle-arena {
   flex: 1;
@@ -379,7 +526,7 @@ onMounted(() => {
 }
 
 .battle-menu {
-  min-height: 160px;
+  height: var(--battle-panel-height);
   background: #333;
   color: white;
   padding: 16px;
@@ -401,6 +548,55 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.bag-menu,
+.party-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bag-item,
+.party-item {
+  background: #fff;
+  border: 2px solid #888;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  padding: 10px;
+  color: #111;
+}
+
+.bag-item:hover,
+.party-item:hover {
+  background: #eee;
+  border-color: #f00;
+}
+
+.party-item:disabled,
+.bag-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bag-name,
+.party-name {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.bag-meta,
+.party-meta {
+  font-size: 10px;
+  color: #444;
+}
+
+.menu-empty {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #ddd;
 }
 
 .moves {

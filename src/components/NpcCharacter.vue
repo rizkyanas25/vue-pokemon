@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { computed, inject, onMounted } from 'vue'
+import { computed, inject } from 'vue'
 import { TILE_SIZE, type NpcData } from '../constants/game'
 import { TileSizeKey } from '../constants/injectKeys'
-import { useGameStore } from '../stores/gameStore'
 
 const props = defineProps<{ npc: NpcData }>()
-const store = useGameStore()
 const tileSize = inject(TileSizeKey, computed(() => TILE_SIZE))
 
-const spriteUrl = computed(() => store.npcSprites[props.npc.id] ?? props.npc.sprite ?? null)
+const spriteUrl = computed(() => props.npc.sprite ?? null)
 
 const npcStyle = computed(() => ({
   width: `${tileSize.value}px`,
@@ -32,9 +30,6 @@ const npcStyle = computed(() => ({
 
 const initial = computed(() => props.npc.name.slice(0, 1).toUpperCase())
 
-onMounted(() => {
-  void store.ensureNpcSprite(props.npc)
-})
 </script>
 
 <template>
