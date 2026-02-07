@@ -1,3 +1,8 @@
 import type { ComputedRef, InjectionKey } from 'vue'
 
-export const TileSizeKey = Symbol('tileSize') as InjectionKey<ComputedRef<number>>
+export type TileSize = {
+  width: number
+  height: number
+}
+
+export const TileSizeKey = Symbol('tileSize') as InjectionKey<ComputedRef<TileSize>>

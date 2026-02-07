@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useGameStore } from '../stores/gameStore'
-import { TILE_SIZE, TILE_COLORS, type TileId } from '../constants/game'
+import { TILE_COLORS, type TileId } from '../constants/game'
 import { TileSizeKey } from '../constants/injectKeys'
 import NpcCharacter from './NpcCharacter.vue'
 import { computed, ref, onMounted, onUnmounted, provide } from 'vue'
@@ -18,21 +18,19 @@ onUnmounted(() => window.removeEventListener('resize', updateSize))
 const mapWidth = computed(() => store.currentMap?.[0]?.length ?? 1)
 const mapHeight = computed(() => store.currentMap?.length ?? 1)
 
-const tileSize = computed(() => {
-  const raw = Math.floor(
-    Math.min(windowSize.value.width / mapWidth.value, windowSize.value.height / mapHeight.value),
-  )
-  return Math.max(24, raw || TILE_SIZE)
-})
+const tileSize = computed(() => ({
+  width: windowSize.value.width / mapWidth.value,
+  height: windowSize.value.height / mapHeight.value,
+}))
 
 provide(TileSizeKey, tileSize)
 
 const mapStyle = computed(() => ({
   display: 'grid',
-  gridTemplateColumns: `repeat(${mapWidth.value}, ${tileSize.value}px)`,
-  gridTemplateRows: `repeat(${mapHeight.value}, ${tileSize.value}px)`,
-  width: `${mapWidth.value * tileSize.value}px`,
-  height: `${mapHeight.value * tileSize.value}px`,
+  gridTemplateColumns: `repeat(${mapWidth.value}, 1fr)`,
+  gridTemplateRows: `repeat(${mapHeight.value}, 1fr)`,
+  width: '100vw',
+  height: '100vh',
 }))
 
 const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
@@ -47,8 +45,8 @@ const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
           :key="`${x}-${y}`"
           class="tile"
           :style="{
-            width: `${tileSize}px`,
-            height: `${tileSize}px`,
+            width: `${tileSize.width}px`,
+            height: `${tileSize.height}px`,
             backgroundColor: getTileColor(tile),
           }"
         >
@@ -80,6 +78,10 @@ const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
 
 .map-row {
   display: contents;
+}
+
+.world-map {
+  position: relative;
 }
 
 .tile {

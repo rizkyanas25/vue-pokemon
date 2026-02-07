@@ -4,20 +4,20 @@ import { TILE_SIZE, type NpcData } from '../constants/game'
 import { TileSizeKey } from '../constants/injectKeys'
 
 const props = defineProps<{ npc: NpcData }>()
-const tileSize = inject(TileSizeKey, computed(() => TILE_SIZE))
+const tileSize = inject(TileSizeKey, computed(() => ({ width: TILE_SIZE, height: TILE_SIZE })))
 
 const spriteUrl = computed(() => props.npc.sprite ?? null)
 
 const npcStyle = computed(() => ({
-  width: `${tileSize.value}px`,
-  height: `${tileSize.value}px`,
-  transform: `translate(${props.npc.x * tileSize.value}px, ${props.npc.y * tileSize.value}px)`,
+  width: `${tileSize.value.width}px`,
+  height: `${tileSize.value.height}px`,
+  transform: `translate(${props.npc.x * tileSize.value.width}px, ${props.npc.y * tileSize.value.height}px)`,
   position: 'absolute' as const,
   top: 0,
   left: 0,
   backgroundColor: spriteUrl.value ? 'transparent' : props.npc.color ?? '#f1a208',
-  border: '2px solid #111',
-  borderRadius: '6px',
+  border: spriteUrl.value ? 'none' : '2px solid #111',
+  borderRadius: spriteUrl.value ? '0' : '6px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',

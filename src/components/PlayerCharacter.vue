@@ -9,7 +9,7 @@ import charmanderImg from '@/assets/sprites/charmander.png'
 import squirtleImg from '@/assets/sprites/squirtle.png'
 
 const store = useGameStore()
-const tileSize = inject(TileSizeKey, computed(() => TILE_SIZE))
+const tileSize = inject(TileSizeKey, computed(() => ({ width: TILE_SIZE, height: TILE_SIZE })))
 
 const spriteMap: Record<string, string> = {
   pikachu: pikachuImg,
@@ -26,9 +26,9 @@ const activeSprite = computed(() => {
 })
 
 const playerStyle = computed(() => ({
-  width: `${tileSize.value}px`,
-  height: `${tileSize.value}px`,
-  transform: `translate(${store.player.x * tileSize.value}px, ${store.player.y * tileSize.value}px)`,
+  width: `${tileSize.value.width}px`,
+  height: `${tileSize.value.height}px`,
+  transform: `translate(${store.player.x * tileSize.value.width}px, ${store.player.y * tileSize.value.height}px)`,
   backgroundImage: `url(${activeSprite.value})`,
   backgroundSize: 'contain',
   backgroundRepeat: 'no-repeat',

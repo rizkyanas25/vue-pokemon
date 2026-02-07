@@ -27,6 +27,9 @@ const store = useGameStore()
 
 const playerPokemon = computed(() => store.player.party[store.player.activeIndex])
 const enemyPokemon = computed(() => store.battle?.enemy ?? null)
+const trainerSprite = computed(() => store.battle?.trainerSprite ?? '')
+const trainerName = computed(() => store.battle?.trainerName ?? 'Trainer')
+const isTrainerBattle = computed(() => Boolean(store.battle?.trainerId))
 
 const spriteMap: Record<string, string> = {
   pikachu: pikachuImg,
@@ -302,8 +305,9 @@ const finishBattle = () => {
     enemy.statusTurns = 0
   }
 
+  const result = pendingEnd.value ?? undefined
   pendingEnd.value = null
-  store.endBattle()
+  store.endBattle(result)
 }
 
 onMounted(() => {
@@ -311,7 +315,13 @@ onMounted(() => {
   const player = playerPokemon.value
   if (player) resetBattleStages(player)
   if (enemy) resetBattleStages(enemy)
-  if (enemy) queueMessages([`A wild ${enemy.name} appeared!`])
+  if (enemy) {
+    if (isTrainerBattle.value) {
+      queueMessages([`${trainerName.value} wants to battle!`, `${trainerName.value} sent out ${enemy.name}!`])
+    } else {
+      queueMessages([`A wild ${enemy.name} appeared!`])
+    }
+  }
 })
 </script>
 
@@ -328,6 +338,8 @@ onMounted(() => {
         </div>
         <div class="hp-text">{{ enemyPokemon.currentHp }} / {{ enemyPokemon.stats.hp }}</div>
       </div>
+
+      <img v-if="trainerSprite" class="trainer-sprite" :src="trainerSprite" alt="Trainer" />
 
       <div class="sprite-container enemy-sprite">
         <img v-if="getSprite(enemyPokemon)" :src="getSprite(enemyPokemon)" alt="Enemy" />
@@ -456,6 +468,16 @@ onMounted(() => {
   image-rendering: pixelated;
 }
 
+.trainer-sprite {
+  position: absolute;
+  top: 20px;
+  right: 140px;
+  width: 140px;
+  image-rendering: pixelated;
+  opacity: 0.9;
+  z-index: 1;
+}
+
 .sprite-placeholder {
   width: 120px;
   height: 120px;
@@ -467,6 +489,7 @@ onMounted(() => {
 .enemy-sprite {
   top: 40px;
   right: 40px;
+  z-index: 2;
 }
 
 .player-sprite {

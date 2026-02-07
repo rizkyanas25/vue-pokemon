@@ -20,6 +20,15 @@ export type BagItem = {
 }
 
 type BattleTerrain = 'grass' | 'water' | 'default'
+type BattleOutcome = 'WIN' | 'LOSE' | 'RUN'
+
+type BattleState = {
+  enemy: PokemonInstance
+  terrain: BattleTerrain
+  trainerId?: string
+  trainerName?: string
+  trainerSprite?: string | null
+}
 
 export type DexEntry = {
   key: string
@@ -53,7 +62,7 @@ export const useGameStore = defineStore('game', () => {
   const currentMap = ref<TileId[][]>(overworldMap.tiles)
   const npcs = ref<NpcData[]>(overworldNpcs)
 
-  const battle = ref<{ enemy: PokemonInstance; terrain: BattleTerrain } | null>(null)
+  const battle = ref<BattleState | null>(null)
   const menuTab = ref<MenuTab>('party')
   const worldPos = ref({ x: 1, y: 1 })
   const mapCache = ref<Record<string, TileId[][]>>({})
@@ -66,6 +75,7 @@ export const useGameStore = defineStore('game', () => {
   ])
 
   const saveKey = 'pokemon-vue-save-v3'
+  const MAP_VERSION = 2
   const legacySaveKey = 'pokemon-vue-save-v2'
   const legacySaveKeyV1 = 'pokemon-vue-save-v1'
   const hasSaveData = ref(false)
@@ -171,10 +181,98 @@ export const useGameStore = defineStore('game', () => {
     return WALKABLE_TILES.has(tile)
   }
 
+  const isTrainerNpc = (npc: NpcData) => npc.role === 'trainer'
+  const isTrainerActive = (npc: NpcData) => isTrainerNpc(npc) && !npc.defeated
+
+  const buildReachableSet = (tiles: TileId[][]) => {
+    const height = tiles.length
+    const width = tiles[0]?.length ?? 0
+    const reachable = new Set<string>()
+    const queue: Array<{ x: number; y: number }> = []
+
+    const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < width && y < height
+    const enqueue = (x: number, y: number) => {
+      if (!inBounds(x, y)) return
+      if (!isTileWalkable(tiles, x, y)) return
+      const key = `${x},${y}`
+      if (!reachable.has(key)) queue.push({ x, y })
+    }
+
+    for (let x = 0; x < width; x += 1) {
+      enqueue(x, 0)
+      enqueue(x, height - 1)
+    }
+    for (let y = 0; y < height; y += 1) {
+      enqueue(0, y)
+      enqueue(width - 1, y)
+    }
+
+    while (queue.length > 0) {
+      const current = queue.shift()
+      if (!current) break
+      const key = `${current.x},${current.y}`
+      if (reachable.has(key)) continue
+      reachable.add(key)
+
+      enqueue(current.x + 1, current.y)
+      enqueue(current.x - 1, current.y)
+      enqueue(current.x, current.y + 1)
+      enqueue(current.x, current.y - 1)
+    }
+
+    return reachable
+  }
+
+  const findNearestWalkable = (tiles: TileId[][], startX: number, startY: number) => {
+    const height = tiles.length
+    const width = tiles[0]?.length ?? 0
+    const visited = new Set<string>()
+    const queue: Array<{ x: number; y: number }> = [{ x: startX, y: startY }]
+
+    const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < width && y < height
+
+    while (queue.length > 0) {
+      const current = queue.shift()
+      if (!current) break
+      const key = `${current.x},${current.y}`
+      if (visited.has(key)) continue
+      visited.add(key)
+
+      if (isTileWalkable(tiles, current.x, current.y)) return current
+
+      const candidates = [
+        { x: current.x + 1, y: current.y },
+        { x: current.x - 1, y: current.y },
+        { x: current.x, y: current.y + 1 },
+        { x: current.x, y: current.y - 1 },
+      ]
+      for (const next of candidates) {
+        if (!inBounds(next.x, next.y)) continue
+        const nextKey = `${next.x},${next.y}`
+        if (!visited.has(nextKey)) queue.push(next)
+      }
+    }
+
+    return null
+  }
+
+  const ensurePlayerOnWalkable = () => {
+    if (isTileWalkable(currentMap.value, player.value.x, player.value.y)) return
+    const fallback = findNearestWalkable(currentMap.value, player.value.x, player.value.y)
+    if (fallback) {
+      player.value.x = fallback.x
+      player.value.y = fallback.y
+    }
+  }
+
   const randomTrainerSprite = () =>
     TRAINER_SPRITES[Math.floor(Math.random() * TRAINER_SPRITES.length)] as TrainerSpriteId
 
-  const findRandomWalkableSpot = (tiles: TileId[][], existing: NpcData[]) => {
+  const findRandomWalkableSpot = (
+    tiles: TileId[][],
+    existing: NpcData[],
+    reachable?: Set<string>,
+  ) => {
     const height = tiles.length
     const width = tiles[0]?.length ?? 0
     const attempts = 50
@@ -183,6 +281,7 @@ export const useGameStore = defineStore('game', () => {
       const x = Math.floor(Math.random() * Math.max(1, width - 4)) + 2
       const y = Math.floor(Math.random() * Math.max(1, height - 4)) + 2
       if (!isTileWalkable(tiles, x, y)) continue
+      if (reachable && !reachable.has(`${x},${y}`)) continue
       if (existing.some((npc) => npc.x === x && npc.y === y)) continue
       return { x, y }
     }
@@ -190,8 +289,13 @@ export const useGameStore = defineStore('game', () => {
     return null
   }
 
-  const createTrainerNpc = (key: string, tiles: TileId[][], existing: NpcData[]) => {
-    const spot = findRandomWalkableSpot(tiles, existing)
+  const createTrainerNpc = (
+    key: string,
+    tiles: TileId[][],
+    existing: NpcData[],
+    reachable?: Set<string>,
+  ) => {
+    const spot = findRandomWalkableSpot(tiles, existing, reachable)
     if (!spot) return null
     const spriteId = randomTrainerSprite()
     return {
@@ -201,6 +305,8 @@ export const useGameStore = defineStore('game', () => {
       y: spot.y,
       sprite: trainerSprite(spriteId),
       dialog: ['A trainer is looking for a battle.'],
+      role: 'trainer',
+      defeated: false,
     } as NpcData
   }
 
@@ -211,7 +317,8 @@ export const useGameStore = defineStore('game', () => {
     if (trainerCount >= 2) return
     if (Math.random() > 0.03) return
 
-    const npc = createTrainerNpc(key, currentMap.value, npcList)
+    const reachable = buildReachableSet(currentMap.value)
+    const npc = createTrainerNpc(key, currentMap.value, npcList, reachable)
     if (!npc) return
     npcList.push(npc)
     npcCache.value[key] = npcList
@@ -224,7 +331,7 @@ export const useGameStore = defineStore('game', () => {
       const row: TileId[] = []
       for (let x = 0; x < width; x += 1) {
         if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
-          row.push(TILE.WALL)
+          row.push(TILE.GRASS)
           continue
         }
         const rand = Math.random()
@@ -248,14 +355,16 @@ export const useGameStore = defineStore('game', () => {
     const tiles = isCenter ? overworldMap.tiles : generateMap(width, height)
     mapCache.value[key] = tiles
 
+    const reachable = buildReachableSet(tiles)
     const baseNpcs = isCenter ? [...overworldNpcs] : []
     const npcList = [...baseNpcs]
     const spawnCount = isCenter ? 1 : Math.random() < 0.6 ? 1 : 0
     for (let i = 0; i < spawnCount; i += 1) {
-      const npc = createTrainerNpc(key, tiles, npcList)
+      const npc = createTrainerNpc(key, tiles, npcList, reachable)
       if (npc) npcList.push(npc)
     }
-    npcCache.value[key] = npcList
+    const filtered = npcList.filter((npc) => !isTrainerNpc(npc) || reachable.has(`${npc.x},${npc.y}`))
+    npcCache.value[key] = filtered
     return key
   }
 
@@ -263,7 +372,12 @@ export const useGameStore = defineStore('game', () => {
     const key = ensureMapAt(x, y)
     worldPos.value = { x, y }
     currentMap.value = mapCache.value[key]
-    npcs.value = npcCache.value[key] ?? []
+    const reachable = buildReachableSet(currentMap.value)
+    const npcList = (npcCache.value[key] ?? []).filter(
+      (npc) => !isTrainerNpc(npc) || reachable.has(`${npc.x},${npc.y}`),
+    )
+    npcCache.value[key] = npcList
+    npcs.value = npcList
   }
 
   const isWalkable = (x: number, y: number) => {
@@ -272,6 +386,18 @@ export const useGameStore = defineStore('game', () => {
     const tile = row[x]
     if (tile === undefined) return false
     return WALKABLE_TILES.has(tile)
+  }
+
+  const findAdjacentTrainer = () => {
+    const { x, y } = player.value
+    return (
+      npcs.value.find((npc) => {
+        if (!isTrainerActive(npc)) return false
+        const dx = Math.abs(npc.x - x)
+        const dy = Math.abs(npc.y - y)
+        return dx <= 1 && dy <= 1 && (dx !== 0 || dy !== 0)
+      }) ?? null
+    )
   }
 
   const getFrontTile = () => {
@@ -284,6 +410,8 @@ export const useGameStore = defineStore('game', () => {
 
   function movePlayer(dx: number, dy: number) {
     if (gameState.value !== 'ROAMING' || isLoading.value) return
+
+    ensurePlayerOnWalkable()
 
     const newX = player.value.x + dx
     const newY = player.value.y + dy
@@ -346,15 +474,22 @@ export const useGameStore = defineStore('game', () => {
       if (tryTransition()) return
     }
 
-    if (!isWalkable(newX, newY)) return
-    if (getNpcAt(newX, newY)) return
-
-    const tile = currentMap.value[newY]?.[newX]
+    const row = currentMap.value[newY]
+    if (!row) return
+    const tile = row[newX]
     if (tile === undefined) return
+    if (!WALKABLE_TILES.has(tile)) return
+    if (getNpcAt(newX, newY)) return
 
     player.value.x = newX
     player.value.y = newY
     player.value.step = (player.value.step + 1) % 2
+
+    const nearbyTrainer = findAdjacentTrainer()
+    if (nearbyTrainer) {
+      void startTrainerBattle(nearbyTrainer, tile)
+      return
+    }
 
     if (tile === TILE.GRASS && Math.random() < 0.08) {
       void startWildBattle(tile)
@@ -370,6 +505,33 @@ export const useGameStore = defineStore('game', () => {
   function setActiveParty(index: number) {
     if (index < 0 || index >= player.value.party.length) return
     player.value.activeIndex = index
+  }
+
+  function startTrainerBattle(npc: NpcData, tile?: TileId) {
+    if (gameState.value !== 'ROAMING' || isLoading.value) return Promise.resolve()
+    if (!player.value.party[player.value.activeIndex]) return Promise.resolve()
+
+    isLoading.value = true
+    const enemyLevel = Math.max(2, player.value.party[player.value.activeIndex].level)
+    const foeLookup = npc.pokemonId ?? npc.pokemonKey ?? Math.floor(Math.random() * 151) + 1
+    const terrain: BattleTerrain =
+      tile === TILE.WATER ? 'water' : tile === TILE.GRASS ? 'grass' : 'default'
+
+    return ensureSpecies(foeLookup)
+      .then((species) => {
+        battle.value = {
+          enemy: createPokemonInstance(species, enemyLevel),
+          terrain,
+          trainerId: npc.id,
+          trainerName: npc.name,
+          trainerSprite: npc.sprite ?? null,
+        }
+        markSeen(species)
+        gameState.value = 'BATTLE'
+      })
+      .finally(() => {
+        isLoading.value = false
+      })
   }
 
   function startWildBattle(tile?: TileId) {
@@ -393,7 +555,15 @@ export const useGameStore = defineStore('game', () => {
       })
   }
 
-  function endBattle() {
+  const markTrainerDefeated = (trainerId: string) => {
+    const npc = npcs.value.find((entry) => entry.id === trainerId)
+    if (npc) npc.defeated = true
+  }
+
+  function endBattle(result?: BattleOutcome) {
+    if (battle.value?.trainerId && result === 'WIN') {
+      markTrainerDefeated(battle.value.trainerId)
+    }
     battle.value = null
     gameState.value = 'ROAMING'
   }
@@ -481,6 +651,7 @@ export const useGameStore = defineStore('game', () => {
       pokedex: pokedex.value,
       speciesCache: speciesCache.value,
       worldPos: worldPos.value,
+      mapVersion: MAP_VERSION,
       mapCache: mapCache.value,
       npcCache: npcCache.value,
     }
@@ -581,16 +752,19 @@ export const useGameStore = defineStore('game', () => {
       }
 
       money.value = typeof data.money === 'number' ? data.money : money.value
-      worldPos.value = data.worldPos ?? worldPos.value
-      mapCache.value = data.mapCache ?? mapCache.value
-      npcCache.value = data.npcCache ?? npcCache.value
 
-      if (mapCache.value[mapKey(worldPos.value.x, worldPos.value.y)]) {
-        currentMap.value = mapCache.value[mapKey(worldPos.value.x, worldPos.value.y)]
+      const loadedWorld = data.worldPos ?? worldPos.value
+      worldPos.value = {
+        x: Math.min(2, Math.max(0, loadedWorld.x ?? 1)),
+        y: Math.min(2, Math.max(0, loadedWorld.y ?? 1)),
       }
-      if (npcCache.value[mapKey(worldPos.value.x, worldPos.value.y)]) {
-        npcs.value = npcCache.value[mapKey(worldPos.value.x, worldPos.value.y)]
-      }
+
+      const shouldResetMaps = data.mapVersion !== MAP_VERSION
+      mapCache.value = shouldResetMaps ? {} : data.mapCache ?? mapCache.value
+      npcCache.value = shouldResetMaps ? {} : data.npcCache ?? npcCache.value
+
+      setCurrentMap(worldPos.value.x, worldPos.value.y)
+      ensurePlayerOnWalkable()
       const rawDex = data.pokedex ?? {}
       pokedex.value = Object.entries(rawDex).reduce((acc, [key, entry]) => {
         acc[normalizeSpeciesKey(key)] = normalizeDexEntry(key, entry as Partial<DexEntry>)
@@ -676,6 +850,7 @@ export const useGameStore = defineStore('game', () => {
       player.value.y = overworldSpawn.y
       player.value.direction = 'down'
       player.value.step = 0
+      ensurePlayerOnWalkable()
       markCaught(species)
       gameState.value = 'ROAMING'
     } finally {
