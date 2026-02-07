@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useGameStore } from '../stores/gameStore'
-import { TILE_SIZE, ASSETS } from '../constants/game'
+import { TILE_SIZE, TILE_COLORS, type TileId } from '../constants/game'
+import NpcCharacter from './NpcCharacter.vue'
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 
 const store = useGameStore()
@@ -37,20 +38,7 @@ const mapStyle = computed(() => ({
   willChange: 'transform',
 }))
 
-const getTileColor = (type: number) => {
-  switch (type) {
-    case 0:
-      return ASSETS.TILES.GRASS
-    case 1:
-      return ASSETS.TILES.WALL
-    case 2:
-      return ASSETS.TILES.WATER
-    case 3:
-      return ASSETS.TILES.DOOR
-    default:
-      return '#000'
-  }
-}
+const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
 </script>
 
 <template>
@@ -71,11 +59,12 @@ const getTileColor = (type: number) => {
           <span v-if="tile === 0" class="grass-detail">.</span>
           <span v-if="tile === 1" class="wall-detail">#</span>
           <span v-if="tile === 2" class="water-detail">~</span>
+          <span v-if="tile === 3" class="path-detail">=</span>
         </div>
       </div>
 
+      <NpcCharacter v-for="npc in store.npcs" :key="npc.id" :npc="npc" />
       <slot />
-      <!-- Player and other entities go here -->
     </div>
   </div>
 </template>
@@ -112,5 +101,8 @@ const getTileColor = (type: number) => {
 }
 .water-detail {
   color: rgba(255, 255, 255, 0.4);
+}
+.path-detail {
+  color: rgba(0, 0, 0, 0.25);
 }
 </style>

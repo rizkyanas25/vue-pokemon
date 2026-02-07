@@ -4,10 +4,18 @@ import { useGameStore } from './stores/gameStore'
 import WorldMap from './components/WorldMap.vue'
 import PlayerCharacter from './components/PlayerCharacter.vue'
 import BattleScene from './components/BattleScene.vue'
+import DialogBox from './components/DialogBox.vue'
 
 const store = useGameStore()
 
 const handleKeydown = (e: KeyboardEvent) => {
+  if (store.gameState === 'DIALOG') {
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (!e.repeat) store.advanceDialog()
+    }
+    return
+  }
+
   if (store.gameState !== 'ROAMING') return
 
   switch (e.key) {
@@ -31,6 +39,11 @@ const handleKeydown = (e: KeyboardEvent) => {
       store.setDirection('right')
       store.movePlayer(1, 0)
       break
+    case 'Enter':
+    case ' ':
+    case 'e':
+      if (!e.repeat) store.tryInteract()
+      break
   }
 }
 
@@ -47,20 +60,23 @@ onUnmounted(() => {
   <main class="game-container">
     <div class="ui-overlay">
       <h1>Pokemon Vue</h1>
-      <p v-if="store.gameState === 'ROAMING'">Use Arrow Keys to Move</p>
+      <p v-if="store.gameState === 'ROAMING'">Move with Arrow Keys, talk with Enter/Space</p>
+      <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
       <p v-else>Battle Mode!</p>
     </div>
 
     <div class="viewport">
-      <template v-if="store.gameState === 'ROAMING'">
+      <template v-if="store.gameState !== 'BATTLE'">
         <WorldMap>
           <PlayerCharacter />
         </WorldMap>
       </template>
-      <template v-else-if="store.gameState === 'BATTLE'">
+      <template v-else>
         <BattleScene />
       </template>
     </div>
+
+    <DialogBox v-if="store.gameState === 'DIALOG' && store.dialog" :dialog="store.dialog" />
   </main>
 </template>
 
