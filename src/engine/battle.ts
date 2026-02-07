@@ -138,17 +138,18 @@ export const resolveMove = (
   moveData: MoveData,
 ) => {
   const messages: string[] = []
+  const defaultStatusChance = 0.5
 
   const actionCheck = attemptAction(attacker)
   messages.push(...actionCheck.messages)
   if (!actionCheck.canAct) {
-    return { messages, didHit: false }
+    return { messages, didHit: false, canAct: false }
   }
 
   const accuracyRoll = Math.random() * 100
   if (accuracyRoll > moveData.accuracy) {
     messages.push(`${attacker.name}'s attack missed!`)
-    return { messages, didHit: false }
+    return { messages, didHit: false, canAct: true }
   }
 
   if (moveData.category === 'status') {
@@ -165,18 +166,18 @@ export const resolveMove = (
       const typeMultiplier = getTypeMultiplier(moveData.type, defenderTypes)
       if (typeMultiplier === 0) {
         messages.push("It doesn't affect the target...")
-        return { messages, didHit: true }
+        return { messages, didHit: true, canAct: true }
       }
 
       const target = moveData.effect.target === 'self' ? attacker : defender
-      const chance = moveData.effect.statusChance ?? 1
+      const chance = moveData.effect.statusChance ?? defaultStatusChance
       if (Math.random() < chance) {
         const result = inflictStatus(target, moveData.effect.status)
         if (result.message) messages.push(result.message)
       }
     }
 
-    return { messages, didHit: true }
+    return { messages, didHit: true, canAct: true }
   }
 
   const power = moveData.power ?? 0
@@ -197,7 +198,7 @@ export const resolveMove = (
 
   if (typeMultiplier === 0) {
     messages.push("It doesn't affect the target...")
-    return { messages, didHit: true }
+    return { messages, didHit: true, canAct: true }
   }
 
   let modifier = stab * typeMultiplier * crit * random
@@ -214,14 +215,14 @@ export const resolveMove = (
   if (typeMultiplier === 0) messages.push("It doesn't affect the target...")
 
   if (moveData.effect?.status) {
-    const chance = moveData.effect.statusChance ?? 1
+    const chance = moveData.effect.statusChance ?? defaultStatusChance
     if (Math.random() < chance) {
       const result = inflictStatus(defender, moveData.effect.status)
       if (result.message) messages.push(result.message)
     }
   }
 
-  return { messages, didHit: true }
+  return { messages, didHit: true, canAct: true }
 }
 
 export const chooseMove = (pokemon: PokemonInstance) => {

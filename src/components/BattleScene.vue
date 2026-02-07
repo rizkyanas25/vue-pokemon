@@ -175,8 +175,10 @@ const resolveTurn = (playerMoveState: MoveState) => {
   for (const action of actions) {
     if (action.actor.currentHp <= 0 || action.target.currentHp <= 0) continue
 
-    messages.push(`${action.actor.name} used ${action.move.name}!`)
     const result = resolveMove(action.actor, action.target, action.move)
+    if (result.canAct) {
+      messages.push(`${action.actor.name} used ${action.move.name}!`)
+    }
     messages.push(...result.messages)
 
     if (action.target.currentHp <= 0) {
@@ -237,8 +239,10 @@ const resolveEnemyTurn = (preMessages: string[]) => {
   const enemyMoveState = chooseMove(enemy)
   if (enemyMoveState) {
     const enemyMove = getMoveDataFromState(enemyMoveState)
-    messages.push(`${enemy.name} used ${enemyMove.name}!`)
     const result = resolveMove(enemy, player, enemyMove)
+    if (result.canAct) {
+      messages.push(`${enemy.name} used ${enemyMove.name}!`)
+    }
     messages.push(...result.messages)
   } else {
     messages.push(`${enemy.name} has no moves left!`)
@@ -308,6 +312,10 @@ const switchPokemon = (index: number) => {
 
 const run = () => {
   if (uiState.value !== 'INPUT') return
+  if (store.battle?.isLegendary) {
+    queueMessages(["You can't run!"])
+    return
+  }
   pendingEnd.value = 'RUN'
   queueMessages(['Got away safely!'])
 }
@@ -600,6 +608,7 @@ onMounted(() => {
             <button
               :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 2 }"
               @click="run"
+              :disabled="store.battle?.isLegendary"
             >
               RUN
             </button>

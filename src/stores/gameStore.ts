@@ -43,6 +43,7 @@ type BattleState = {
   trainerId?: string
   trainerName?: string
   trainerSprite?: string | null
+  isLegendary?: boolean
 }
 
 type PendingBattle = {
@@ -53,6 +54,7 @@ type PendingBattle = {
   trainerId?: string
   trainerName?: string
   trainerSprite?: string | null
+  isLegendary?: boolean
 }
 
 export type DexEntry = {
@@ -71,6 +73,9 @@ const placeholderStats = { hp: 50, atk: 50, def: 50, spa: 50, spd: 50, spe: 50 }
 export const useGameStore = defineStore('game', () => {
   const MOVE_ANIM_MS = 200
   const GLITCH_MS = 520
+  const LEGENDARY_IDS = new Set([144, 145, 146, 150, 151])
+  const LEGENDARY_POOL = [144, 145, 146, 150, 151]
+  const LEGENDARY_CHANCE = 0.1
 
   const gameState = ref<GameState>('ROAMING')
   const isLoading = ref(true)
@@ -238,6 +243,7 @@ export const useGameStore = defineStore('game', () => {
         trainerId: pending.trainerId,
         trainerName: pending.trainerName,
         trainerSprite: pending.trainerSprite,
+        isLegendary: pending.isLegendary,
       }
       markSeen(species)
       gameState.value = 'BATTLE'
@@ -669,8 +675,19 @@ export const useGameStore = defineStore('game', () => {
     if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value) return Promise.resolve()
     if (!player.value.party[player.value.activeIndex]) return Promise.resolve()
 
-    const enemyLevel = Math.max(2, player.value.party[player.value.activeIndex].level - 1)
-    const randomId = Math.floor(Math.random() * 151) + 1
+    const wantsLegendary = Math.random() < LEGENDARY_CHANCE
+    let randomId = Math.floor(Math.random() * 151) + 1
+    if (wantsLegendary) {
+      randomId = LEGENDARY_POOL[Math.floor(Math.random() * LEGENDARY_POOL.length)]
+    } else {
+      while (LEGENDARY_IDS.has(randomId)) {
+        randomId = Math.floor(Math.random() * 151) + 1
+      }
+    }
+    const isLegendary = LEGENDARY_IDS.has(randomId)
+    const enemyLevel = isLegendary
+      ? Math.max(50, player.value.party[player.value.activeIndex].level)
+      : Math.max(2, player.value.party[player.value.activeIndex].level - 1)
     const terrain: BattleTerrain =
       tile === TILE.WATER ? 'water' : tile === TILE.GRASS || tile === TILE.BUSH ? 'grass' : 'default'
 
@@ -680,9 +697,22 @@ export const useGameStore = defineStore('game', () => {
         enemyLevel,
         enemyLookup: randomId,
         terrain,
+        isLegendary,
       },
-      { delayMs: MOVE_ANIM_MS },
+      { delayMs: MOVE_ANIM_MS, autoTransition: !isLegendary },
     )
+
+    if (isLegendary) {
+      dialog.value = {
+        speaker: '???',
+        lines: [
+          'A legendary Pokemon is chasing you!',
+          "You can't run away!",
+        ],
+        index: 0,
+      }
+      gameState.value = 'DIALOG'
+    }
     return Promise.resolve()
   }
 
@@ -1036,8 +1066,8 @@ export const useGameStore = defineStore('game', () => {
     }
 
     dialog.value = null
-    if (pendingBattle.value?.kind === 'trainer') {
-      beginBattleTransition('trainer')
+    if (pendingBattle.value) {
+      beginBattleTransition(pendingBattle.value.kind)
       return
     }
     gameState.value = 'ROAMING'
