@@ -92,7 +92,7 @@ onUnmounted(() => {
 <template>
   <main class="game-container">
     <div class="ui-overlay">
-      <h1>Pokemon Vue</h1>
+      <h1>Pokevue</h1>
       <p v-if="store.gameState === 'ROAMING'">
         Move with Arrow Keys, talk with Enter/Space, menu with M/Esc
       </p>
