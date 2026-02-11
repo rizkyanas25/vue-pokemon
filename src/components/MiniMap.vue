@@ -107,7 +107,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="minimap-container">
+  <div class="minimap-container" :style="{ '--minimap-width': `${CANVAS_WIDTH}px` }">
     <canvas
       ref="canvasRef"
       :width="CANVAS_WIDTH"
@@ -120,6 +120,7 @@ onMounted(() => {
 
 <style scoped>
 .minimap-container {
+  width: var(--minimap-width);
   position: relative;
   border: 2px solid #fff;
   background: #000;
@@ -130,6 +131,8 @@ onMounted(() => {
 
 .minimap-canvas {
   display: block;
+  width: 100%;
+  height: auto;
   image-rendering: pixelated; /* Keep it crisp */
 }
 
@@ -142,5 +145,16 @@ onMounted(() => {
   height: 100%;
   pointer-events: none;
   box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 768px) {
+  .minimap-container {
+    width: min(132px, 32vw);
+    border-width: 1px;
+  }
+
+  .minimap-border {
+    box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.45);
+  }
 }
 </style>

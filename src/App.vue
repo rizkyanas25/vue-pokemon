@@ -99,7 +99,7 @@ onUnmounted(() => {
         <span class="desktop-hint"
           >Move with Arrow Keys, talk with Enter/Space, menu with M/Esc</span
         >
-        <span class="mobile-hint">Use D-Pad to move, A to interact, B for menu</span>
+        <span class="mobile-hint">D-Pad move · A interact · B menu</span>
       </p>
       <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
       <p v-else-if="store.gameState === 'MENU'">Menu</p>
@@ -149,6 +149,7 @@ body {
   width: 100vw;
   height: 100vh;
   position: relative;
+  overflow: hidden;
 }
 
 .ui-overlay {
@@ -163,6 +164,18 @@ body {
   border-radius: 8px;
   pointer-events: none; /* Allow clicking through to map if needed */
   max-width: 300px; /* Prevent it from getting too wide on small screens */
+}
+
+.ui-overlay h1 {
+  margin: 0 0 8px;
+  line-height: 1;
+  font-size: clamp(1.6rem, 4vw, 3rem);
+}
+
+.ui-overlay p {
+  margin: 0;
+  line-height: 1.3;
+  font-size: 0.62rem;
 }
 
 .minimap-overlay {
@@ -188,6 +201,33 @@ body {
 }
 
 @media (max-width: 768px) {
+  .ui-overlay {
+    top: calc(env(safe-area-inset-top) + 8px);
+    left: 12px;
+    right: 12px;
+    max-width: none;
+    text-align: center;
+    padding: 8px 10px;
+    border-radius: 10px;
+  }
+
+  .ui-overlay h1 {
+    margin: 0 0 4px;
+    font-size: clamp(1.4rem, 9vw, 2.3rem);
+  }
+
+  .ui-overlay p {
+    font-size: 0.56rem;
+    line-height: 1.35;
+  }
+
+  .minimap-overlay {
+    top: auto;
+    left: 12px;
+    bottom: calc(env(safe-area-inset-bottom) + 164px);
+    z-index: 110;
+  }
+
   .desktop-hint {
     display: none;
   }

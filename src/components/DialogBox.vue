@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useGameStore } from '../stores/gameStore'
 
 const props = defineProps<{
   dialog: {
@@ -9,15 +10,21 @@ const props = defineProps<{
   }
 }>()
 
+const store = useGameStore()
 const line = computed(() => props.dialog.lines[props.dialog.index] ?? '')
+
+const advanceDialog = () => {
+  if (store.gameState !== 'DIALOG') return
+  store.advanceDialog()
+}
 </script>
 
 <template>
   <div class="dialog-overlay">
-    <div class="dialog-box">
+    <div class="dialog-box" @click="advanceDialog">
       <div v-if="dialog.speaker" class="dialog-speaker">{{ dialog.speaker }}</div>
       <div class="dialog-line">{{ line }}</div>
-      <div class="dialog-hint">Enter / Space</div>
+      <div class="dialog-arrow">▼</div>
     </div>
   </div>
 </template>
@@ -48,6 +55,9 @@ const line = computed(() => props.dialog.lines[props.dialog.index] ?? '')
   font-size: 14px;
   line-height: 1.5;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  cursor: pointer;
+  position: relative;
 }
 
 .dialog-speaker {
@@ -62,10 +72,22 @@ const line = computed(() => props.dialog.lines[props.dialog.index] ?? '')
   min-height: 40px;
 }
 
-.dialog-hint {
-  margin-top: 8px;
-  font-size: 10px;
+.dialog-arrow {
+  position: absolute;
+  right: 16px;
+  bottom: 10px;
+  font-size: 14px;
   color: #a0a0a0;
-  text-align: right;
+  animation: dialog-blink 0.9s infinite;
+}
+
+@keyframes dialog-blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 </style>

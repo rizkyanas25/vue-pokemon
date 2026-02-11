@@ -67,7 +67,15 @@ const menu = () => {
   .virtual-controls {
     display: flex;
     justify-content: space-between;
-    padding: 0 20px;
+    align-items: flex-end;
+    bottom: calc(env(safe-area-inset-bottom) + 12px);
+    height: 128px;
+    padding-left: calc(env(safe-area-inset-left) + 12px);
+    padding-right: calc(env(safe-area-inset-right) + 12px);
+  }
+
+  .action-buttons {
+    transform: translateY(-12px);
   }
 }
 

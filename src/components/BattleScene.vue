@@ -621,6 +621,10 @@ const switchPokemon = (index: number) => {
 
 const run = () => {
   if (uiState.value !== 'INPUT') return
+  if (isTrainerBattle.value) {
+    queueMessages(["You can't run from a trainer battle!"])
+    return
+  }
   if (store.battle?.isLegendary) {
     queueMessages(["You can't run!"])
     return
@@ -965,7 +969,7 @@ onMounted(() => {
                   menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 2,
               }"
               @click="run"
-              :disabled="store.battle?.isLegendary"
+              :disabled="store.battle?.isLegendary || isTrainerBattle"
             >
               RUN
             </button>
