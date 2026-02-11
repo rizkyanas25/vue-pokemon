@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getMoveData } from '../data/battle/moves'
 import { applyExperience, resetBattleStages } from '../engine/pokemon'
 import {
   applyEndOfTurnStatus,
+  attemptCatch,
   chooseMove,
   getEffectiveStat,
   getMoveDataFromState,
@@ -12,17 +13,22 @@ import {
   resolveMove,
 } from '../engine/battle'
 import type { MoveState, PokemonInstance } from '../engine/pokemon'
-import { ITEM_CATALOG, type ItemId } from '../data/items'
+import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
 
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
 import charmanderImg from '@/assets/sprites/charmander.png'
 import squirtleImg from '@/assets/sprites/squirtle.png'
 
-type UiState = 'INPUT' | 'MESSAGE'
-type PendingEnd = 'WIN' | 'LOSE' | 'RUN' | null
+type UiState = 'INPUT' | 'MESSAGE' | 'ANIMATING'
+type PendingEnd = 'WIN' | 'LOSE' | 'RUN' | 'CATCH' | null
 type MenuMode = 'MAIN' | 'BAG' | 'PARTY'
 type MainSection = 'moves' | 'utility'
+
+interface QueueEntry {
+  text: string
+  onShow?: () => void
+}
 
 const store = useGameStore()
 
@@ -48,8 +54,33 @@ const selectedMoveIndex = ref(0)
 const selectedUtilityIndex = ref(0)
 const selectedBagIndex = ref(0)
 const selectedPartyIndex = ref(0)
-const messageQueue = ref<string[]>([])
+const messageQueue = ref<QueueEntry[]>([])
 const currentMessage = ref('')
+
+/* ── Animation state ── */
+const introReady = ref(false)
+const playerAttacking = ref(false)
+const enemyAttacking = ref(false)
+const playerShaking = ref(false)
+const enemyShaking = ref(false)
+const playerFainting = ref(false)
+const enemyFainting = ref(false)
+const flashType = ref('')        // move type for color overlay on target
+const flashSide = ref<'player' | 'enemy' | ''>('') // which side gets flashed
+
+// Delayed HP display for smooth animation sync
+const displayPlayerHp = ref(0)
+const displayEnemyHp = ref(0)
+
+onMounted(() => {
+  if (playerPokemon.value) displayPlayerHp.value = playerPokemon.value.currentHp
+  if (enemyPokemon.value) displayEnemyHp.value = enemyPokemon.value.currentHp
+})
+
+const syncHp = () => {
+  if (playerPokemon.value) displayPlayerHp.value = playerPokemon.value.currentHp
+  if (enemyPokemon.value) displayEnemyHp.value = enemyPokemon.value.currentHp
+}
 
 const movesList = computed(() => playerPokemon.value?.moves ?? [])
 
@@ -58,18 +89,70 @@ const clampIndex = (value: number, max: number) => {
   return Math.min(Math.max(value, 0), max - 1)
 }
 
-const queueMessages = (messages: string[]) => {
-  const filtered = messages.filter(Boolean)
+/* ── Animation helpers ── */
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const triggerAttack = async (side: 'player' | 'enemy') => {
+  if (side === 'player') {
+    playerAttacking.value = true
+    await wait(300)
+    playerAttacking.value = false
+  } else {
+    enemyAttacking.value = true
+    await wait(300)
+    enemyAttacking.value = false
+  }
+}
+
+const triggerShake = async (side: 'player' | 'enemy') => {
+  if (side === 'player') {
+    playerShaking.value = true
+    await wait(400)
+    playerShaking.value = false
+  } else {
+    enemyShaking.value = true
+    await wait(400)
+    enemyShaking.value = false
+  }
+}
+
+const triggerFlash = async (side: 'player' | 'enemy', moveType: string) => {
+  flashSide.value = side
+  flashType.value = moveType
+  await wait(350)
+  flashType.value = ''
+  flashSide.value = ''
+}
+
+const triggerFaint = async (side: 'player' | 'enemy') => {
+  if (side === 'player') {
+    playerFainting.value = true
+  } else {
+    enemyFainting.value = true
+  }
+  await wait(600)
+}
+
+/* ── Message queue with animation support ── */
+const queueEntries = (entries: QueueEntry[]) => {
+  const filtered = entries.filter(e => e.text)
   if (filtered.length === 0) return
   messageQueue.value.push(...filtered)
   if (!currentMessage.value) showNextMessage()
 }
 
+const queueMessages = (messages: string[]) => {
+  queueEntries(messages.map(text => ({ text })))
+}
+
 const showNextMessage = () => {
   const next = messageQueue.value.shift()
   if (next) {
-    currentMessage.value = next
+    currentMessage.value = next.text
     uiState.value = 'MESSAGE'
+    if (next.onShow) {
+      next.onShow()
+    }
     return
   }
 
@@ -84,6 +167,7 @@ const showNextMessage = () => {
 }
 
 const advanceMessage = () => {
+  if (uiState.value === 'ANIMATING') return
   if (uiState.value !== 'MESSAGE') return
   showNextMessage()
 }
@@ -95,10 +179,21 @@ const getSprite = (pokemon: PokemonInstance | null) => {
   return spriteMap[key] ?? ''
 }
 
-const hpPercent = (pokemon: PokemonInstance | null) => {
-  if (!pokemon) return 0
-  return Math.max(0, Math.min(100, (pokemon.currentHp / pokemon.stats.hp) * 100))
+const hpPercent = (hp: number, maxHp: number) => {
+  return Math.max(0, Math.min(100, (hp / maxHp) * 100))
 }
+
+const hpBarColor = (hp: number, maxHp: number) => {
+  const pct = hpPercent(hp, maxHp)
+  if (pct > 50) return '#4caf50'
+  if (pct > 20) return '#f9a825'
+  return '#e53935'
+}
+
+const playerHpPct = computed(() => hpPercent(displayPlayerHp.value, playerPokemon.value?.stats.hp ?? 1))
+const enemyHpPct = computed(() => hpPercent(displayEnemyHp.value, enemyPokemon.value?.stats.hp ?? 1))
+const playerHpColor = computed(() => hpBarColor(displayPlayerHp.value, playerPokemon.value?.stats.hp ?? 1))
+const enemyHpColor = computed(() => hpBarColor(displayEnemyHp.value, enemyPokemon.value?.stats.hp ?? 1))
 
 const playerStatus = computed(() => getStatusLabel(playerPokemon.value.status))
 const enemyStatus = computed(() =>
@@ -133,6 +228,7 @@ const battleBackgroundStyle = computed(() => {
   }
 })
 
+/* ── Turn resolution with animations ── */
 const resolveTurn = (playerMoveState: MoveState) => {
   const player = playerPokemon.value
   const enemy = enemyPokemon.value
@@ -149,79 +245,137 @@ const resolveTurn = (playerMoveState: MoveState) => {
   const enemyMove = enemyMoveState ? getMoveDataFromState(enemyMoveState) : null
 
   const actions = [
-    { actor: player, target: enemy, move: playerMove, moveState: playerMoveState },
-    enemyMove ? { actor: enemy, target: player, move: enemyMove, moveState: enemyMoveState } : null,
+    { actor: player, target: enemy, move: playerMove, moveState: playerMoveState, side: 'player' as const },
+    enemyMove ? { actor: enemy, target: player, move: enemyMove, moveState: enemyMoveState, side: 'enemy' as const } : null,
   ].filter(Boolean) as Array<{
     actor: PokemonInstance
     target: PokemonInstance
     move: ReturnType<typeof getMoveData>
     moveState: MoveState
+    side: 'player' | 'enemy'
   }>
 
   actions.sort((a, b) => {
     const priorityA = a.move.priority ?? 0
     const priorityB = b.move.priority ?? 0
     if (priorityA !== priorityB) return priorityB - priorityA
-
     const speedA = getEffectiveStat(a.actor, 'spe')
     const speedB = getEffectiveStat(b.actor, 'spe')
     if (speedA !== speedB) return speedB - speedA
-
     return Math.random() < 0.5 ? -1 : 1
   })
 
-  const messages: string[] = []
+  const entries: QueueEntry[] = []
 
   for (const action of actions) {
     if (action.actor.currentHp <= 0 || action.target.currentHp <= 0) continue
 
+    const hpBefore = action.target.currentHp
     const result = resolveMove(action.actor, action.target, action.move)
+
+    const attackerSide = action.side
+    const targetSide = action.side === 'player' ? 'enemy' : 'player'
+
     if (result.canAct) {
-      messages.push(`${action.actor.name} used ${action.move.name}!`)
+      entries.push({
+        text: `${action.actor.name} used ${action.move.name}!`,
+        onShow: () => {
+          triggerAttack(attackerSide)
+        },
+      })
     }
-    messages.push(...result.messages)
+
+    // Add damage-related messages with shake + flash + HP sync
+    const damageDealt = hpBefore - action.target.currentHp
+    const hasResultMessages = result.messages.length > 0
+
+    if (hasResultMessages) {
+      const firstMsg = result.messages[0]
+      const restMsgs = result.messages.slice(1)
+
+      entries.push({
+        text: firstMsg,
+        onShow: () => {
+          if (damageDealt > 0) {
+            triggerFlash(targetSide, action.move.type)
+            triggerShake(targetSide)
+          }
+          syncHp()
+        },
+      })
+
+      for (const msg of restMsgs) {
+        entries.push({ text: msg, onShow: syncHp })
+      }
+    } else if (damageDealt > 0) {
+      // No extra messages but damage was dealt - sync HP after attack message
+      const lastEntry = entries[entries.length - 1]
+      if (lastEntry) {
+        const originalOnShow = lastEntry.onShow
+        lastEntry.onShow = () => {
+          originalOnShow?.()
+          setTimeout(() => {
+            triggerFlash(targetSide, action.move.type)
+            triggerShake(targetSide)
+            syncHp()
+          }, 350)
+        }
+      }
+    }
 
     if (action.target.currentHp <= 0) {
-      messages.push(`${action.target.name} fainted!`)
+      const faintSide = targetSide
+      entries.push({
+        text: `${action.target.name} fainted!`,
+        onShow: () => {
+          syncHp()
+          triggerFaint(faintSide)
+        },
+      })
       break
     }
   }
 
   if (enemy.currentHp <= 0) {
     const expGain = Math.floor((enemy.species.baseExp * enemy.level) / 7)
-    messages.push(`${player.name} gained ${expGain} EXP!`)
+    entries.push({ text: `${player.name} gained ${expGain} EXP!` })
     const reward = Math.max(20, Math.floor(enemy.level * 15))
     store.addMoney(reward)
-    messages.push(`You got ₽${reward}!`)
+    entries.push({ text: `You got ₽${reward}!` })
     const { levelsGained } = applyExperience(player, expGain)
     if (levelsGained > 0) {
-      messages.push(`${player.name} grew to level ${player.level}!`)
+      entries.push({ text: `${player.name} grew to level ${player.level}!` })
     }
     pendingEnd.value = 'WIN'
   } else if (player.currentHp <= 0) {
-    messages.push(`${player.name} fainted...`)
     pendingEnd.value = 'LOSE'
   } else {
-    const endMessages: string[] = []
+    const endEntries: QueueEntry[] = []
     const playerEnd = applyEndOfTurnStatus(player)
-    if (playerEnd.message) endMessages.push(playerEnd.message)
+    if (playerEnd.message) endEntries.push({
+      text: playerEnd.message,
+      onShow: () => { syncHp(); if (player.currentHp > 0) triggerShake('player') },
+    })
     const enemyEnd = applyEndOfTurnStatus(enemy)
-    if (enemyEnd.message) endMessages.push(enemyEnd.message)
+    if (enemyEnd.message) endEntries.push({
+      text: enemyEnd.message,
+      onShow: () => { syncHp(); if (enemy.currentHp > 0) triggerShake('enemy') },
+    })
 
     if (player.currentHp <= 0) {
-      endMessages.push(`${player.name} fainted...`)
+      endEntries.push({ text: `${player.name} fainted...`, onShow: () => { syncHp(); triggerFaint('player') } })
       pendingEnd.value = 'LOSE'
     }
     if (enemy.currentHp <= 0) {
-      endMessages.push(`${enemy.name} fainted!`)
+      endEntries.push({ text: `${enemy.name} fainted!`, onShow: () => { syncHp(); triggerFaint('enemy') } })
       pendingEnd.value = 'WIN'
     }
 
-    messages.push(...endMessages)
+    entries.push(...endEntries)
   }
 
   uiState.value = 'MESSAGE'
-  queueMessages(messages)
+  queueEntries(entries)
 }
 
 const selectMove = (moveState: MoveState) => {
@@ -229,49 +383,83 @@ const selectMove = (moveState: MoveState) => {
   resolveTurn(moveState)
 }
 
-const resolveEnemyTurn = (preMessages: string[]) => {
+const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
   const player = playerPokemon.value
   const enemy = enemyPokemon.value
   if (!player || !enemy) return
 
-  const messages: string[] = [...preMessages]
+  const entries: QueueEntry[] = [...preEntries]
 
   const enemyMoveState = chooseMove(enemy)
   if (enemyMoveState) {
     const enemyMove = getMoveDataFromState(enemyMoveState)
+    const hpBefore = player.currentHp
     const result = resolveMove(enemy, player, enemyMove)
+    const damageDealt = hpBefore - player.currentHp
+
     if (result.canAct) {
-      messages.push(`${enemy.name} used ${enemyMove.name}!`)
+      entries.push({
+        text: `${enemy.name} used ${enemyMove.name}!`,
+        onShow: () => triggerAttack('enemy'),
+      })
     }
-    messages.push(...result.messages)
+
+    if (result.messages.length > 0) {
+      entries.push({
+        text: result.messages[0],
+        onShow: () => {
+          if (damageDealt > 0) {
+            triggerFlash('player', enemyMove.type)
+            triggerShake('player')
+          }
+          syncHp()
+        },
+      })
+      for (const msg of result.messages.slice(1)) {
+        entries.push({ text: msg, onShow: syncHp })
+      }
+    } else if (damageDealt > 0) {
+      const lastEntry = entries[entries.length - 1]
+      if (lastEntry) {
+        const originalOnShow = lastEntry.onShow
+        lastEntry.onShow = () => {
+          originalOnShow?.()
+          setTimeout(() => {
+            triggerFlash('player', enemyMove.type)
+            triggerShake('player')
+            syncHp()
+          }, 350)
+        }
+      }
+    }
   } else {
-    messages.push(`${enemy.name} has no moves left!`)
+    entries.push({ text: `${enemy.name} has no moves left!` })
   }
 
   if (player.currentHp <= 0) {
-    messages.push(`${player.name} fainted...`)
+    entries.push({ text: `${player.name} fainted...`, onShow: () => { syncHp(); triggerFaint('player') } })
     pendingEnd.value = 'LOSE'
   } else {
-    const endMessages: string[] = []
+    const endEntries: QueueEntry[] = []
     const playerEnd = applyEndOfTurnStatus(player)
-    if (playerEnd.message) endMessages.push(playerEnd.message)
+    if (playerEnd.message) endEntries.push({ text: playerEnd.message, onShow: () => { syncHp(); triggerShake('player') } })
     const enemyEnd = applyEndOfTurnStatus(enemy)
-    if (enemyEnd.message) endMessages.push(enemyEnd.message)
+    if (enemyEnd.message) endEntries.push({ text: enemyEnd.message, onShow: () => { syncHp(); triggerShake('enemy') } })
 
     if (player.currentHp <= 0) {
-      endMessages.push(`${player.name} fainted...`)
+      endEntries.push({ text: `${player.name} fainted...`, onShow: () => { syncHp(); triggerFaint('player') } })
       pendingEnd.value = 'LOSE'
     }
     if (enemy.currentHp <= 0) {
-      endMessages.push(`${enemy.name} fainted!`)
+      endEntries.push({ text: `${enemy.name} fainted!`, onShow: () => { syncHp(); triggerFaint('enemy') } })
       pendingEnd.value = 'WIN'
     }
 
-    messages.push(...endMessages)
+    entries.push(...endEntries)
   }
 
   uiState.value = 'MESSAGE'
-  queueMessages(messages)
+  queueEntries(entries)
 }
 
 const openBag = () => {
@@ -291,8 +479,47 @@ const backToMain = () => {
 
 const useBattleItem = (itemId: ItemId) => {
   if (uiState.value !== 'INPUT') return
+  const enemy = enemyPokemon.value
+  if (!enemy) return
+
+  if (isCatchItem(itemId)) {
+    if (isTrainerBattle.value) {
+      queueMessages(["You can't catch a trainer's Pokemon!"])
+      return
+    }
+
+    const ballRate = store.useCatchItem(itemId)
+    if (ballRate === null) {
+      queueMessages(['No items left.'])
+      return
+    }
+
+    const ballName = ITEM_CATALOG[itemId]?.name ?? 'Poke Ball'
+    const entries: QueueEntry[] = [{ text: `You threw a ${ballName}!` }]
+
+    const result = attemptCatch(enemy, ballRate)
+    for (const msg of result.messages) {
+      entries.push({ text: msg })
+    }
+
+    if (result.caught) {
+      const catchResult = store.catchPokemon(enemy)
+      entries.push({ text: catchResult.message })
+      pendingEnd.value = 'CATCH'
+      uiState.value = 'MESSAGE'
+      queueEntries(entries)
+    } else {
+      // Enemy gets a turn after failed catch
+      const preEntries = entries
+      resolveEnemyTurn(preEntries)
+    }
+
+    menuMode.value = 'MAIN'
+    return
+  }
+
   const message = store.useItem(itemId)
-  resolveEnemyTurn([message])
+  resolveEnemyTurn([{ text: message, onShow: syncHp }])
   menuMode.value = 'MAIN'
 }
 
@@ -306,7 +533,9 @@ const switchPokemon = (index: number) => {
   if (index === store.player.activeIndex) return
 
   store.setActiveParty(index)
-  resolveEnemyTurn([`Go, ${target.name}!`])
+  // Sync display HP for the new active pokemon
+  displayPlayerHp.value = target.currentHp
+  resolveEnemyTurn([{ text: `Go, ${target.name}!` }])
   menuMode.value = 'MAIN'
 }
 
@@ -342,6 +571,7 @@ const finishBattle = () => {
   store.endBattle(result)
 }
 
+/* ── Keyboard navigation ── */
 const handleMoveNavigation = (key: string) => {
   const moveCount = movesList.value.length
   if (moveCount === 0) return
@@ -405,6 +635,8 @@ const handleBattleKeydown = (e: KeyboardEvent) => {
   if (isArrow || isConfirm || isCancel) {
     e.preventDefault()
   }
+
+  if (uiState.value === 'ANIMATING') return
 
   if (uiState.value === 'MESSAGE') {
     if (isConfirm) advanceMessage()
@@ -482,6 +714,12 @@ onMounted(() => {
   const player = playerPokemon.value
   if (player) resetBattleStages(player)
   if (enemy) resetBattleStages(enemy)
+
+  // Trigger intro animation after a brief delay
+  setTimeout(() => {
+    introReady.value = true
+  }, 50)
+
   if (enemy) {
     if (isTrainerBattle.value) {
       queueMessages([
@@ -498,7 +736,8 @@ onMounted(() => {
 <template>
   <div class="battle-scene" :style="battleBackgroundStyle" v-if="enemyPokemon && playerPokemon">
     <div class="battle-arena">
-      <div class="hud enemy-hud">
+      <!-- Enemy HUD -->
+      <div class="hud enemy-hud" :class="{ 'intro-hud-enemy': !introReady }">
         <div class="name">
           {{ enemyPokemon.name }} Lv{{ enemyPokemon.level }}
           <span v-if="enemyStatus" class="status">{{ enemyStatus }}</span>
@@ -514,19 +753,52 @@ onMounted(() => {
           </span>
         </div>
         <div class="hp-bar">
-          <div class="hp-fill" :style="{ width: `${hpPercent(enemyPokemon)}%` }"></div>
+          <div
+            class="hp-fill"
+            :style="{ width: `${enemyHpPct}%`, backgroundColor: enemyHpColor }"
+          ></div>
         </div>
-        <div class="hp-text">{{ enemyPokemon.currentHp }} / {{ enemyPokemon.stats.hp }}</div>
+        <div class="hp-text">{{ displayEnemyHp }} / {{ enemyPokemon.stats.hp }}</div>
       </div>
 
       <img v-if="trainerSprite" class="trainer-sprite" :src="trainerSprite" alt="Trainer" />
 
-      <div class="sprite-container enemy-sprite">
+      <!-- Enemy sprite -->
+      <div
+        class="sprite-container enemy-sprite"
+        :class="{
+          'intro-enemy': !introReady,
+          'anim-shake': enemyShaking,
+          'anim-faint': enemyFainting,
+          'anim-attack-enemy': enemyAttacking,
+        }"
+      >
+        <!-- Type flash overlay -->
+        <div
+          v-if="flashType && flashSide === 'enemy'"
+          class="flash-overlay"
+          :class="`flash-${flashType}`"
+        ></div>
         <img v-if="getSprite(enemyPokemon)" :src="getSprite(enemyPokemon)" alt="Enemy" />
         <div v-else class="sprite-placeholder"></div>
       </div>
 
-      <div class="sprite-container player-sprite">
+      <!-- Player sprite -->
+      <div
+        class="sprite-container player-sprite"
+        :class="{
+          'intro-player': !introReady,
+          'anim-shake': playerShaking,
+          'anim-faint': playerFainting,
+          'anim-attack-player': playerAttacking,
+        }"
+      >
+        <!-- Type flash overlay -->
+        <div
+          v-if="flashType && flashSide === 'player'"
+          class="flash-overlay"
+          :class="`flash-${flashType}`"
+        ></div>
         <img v-if="getSprite(playerPokemon)" :src="getSprite(playerPokemon)" alt="Player" />
         <div v-else class="sprite-placeholder"></div>
       </div>
@@ -538,7 +810,8 @@ onMounted(() => {
         alt="Player Trainer"
       />
 
-      <div class="hud player-hud">
+      <!-- Player HUD -->
+      <div class="hud player-hud" :class="{ 'intro-hud-player': !introReady }">
         <div class="name">
           {{ playerPokemon.name }} Lv{{ playerPokemon.level }}
           <span v-if="playerStatus" class="status">{{ playerStatus }}</span>
@@ -554,9 +827,12 @@ onMounted(() => {
           </span>
         </div>
         <div class="hp-bar">
-          <div class="hp-fill" :style="{ width: `${hpPercent(playerPokemon)}%` }"></div>
+          <div
+            class="hp-fill"
+            :style="{ width: `${playerHpPct}%`, backgroundColor: playerHpColor }"
+          ></div>
         </div>
-        <div class="hp-text">{{ playerPokemon.currentHp }} / {{ playerPokemon.stats.hp }}</div>
+        <div class="hp-text">{{ displayPlayerHp }} / {{ playerPokemon.stats.hp }}</div>
       </div>
     </div>
 
@@ -674,10 +950,13 @@ onMounted(() => {
 .battle-arena {
   flex: 1;
   position: relative;
+  overflow: hidden;
 }
 
+/* ── Sprite containers ── */
 .sprite-container {
   position: absolute;
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 .sprite-container img {
   width: 144px;
@@ -725,6 +1004,154 @@ onMounted(() => {
   z-index: 2;
 }
 
+/* ── Flash overlay ── */
+.flash-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  border-radius: 8px;
+  pointer-events: none;
+  animation: flashPulse 0.35s ease-out forwards;
+  mix-blend-mode: screen;
+}
+
+@keyframes flashPulse {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
+.flash-normal { background: radial-gradient(circle, rgba(168,168,120,0.8), transparent 70%); }
+.flash-fire { background: radial-gradient(circle, rgba(255,100,30,0.9), transparent 70%); }
+.flash-water { background: radial-gradient(circle, rgba(80,144,255,0.9), transparent 70%); }
+.flash-electric { background: radial-gradient(circle, rgba(255,220,30,0.9), transparent 70%); }
+.flash-grass { background: radial-gradient(circle, rgba(100,210,60,0.9), transparent 70%); }
+.flash-ice { background: radial-gradient(circle, rgba(150,220,230,0.9), transparent 70%); }
+.flash-fighting { background: radial-gradient(circle, rgba(200,40,30,0.9), transparent 70%); }
+.flash-poison { background: radial-gradient(circle, rgba(170,50,170,0.9), transparent 70%); }
+.flash-ground { background: radial-gradient(circle, rgba(230,190,90,0.9), transparent 70%); }
+.flash-flying { background: radial-gradient(circle, rgba(170,140,255,0.9), transparent 70%); }
+.flash-psychic { background: radial-gradient(circle, rgba(255,80,140,0.9), transparent 70%); }
+.flash-bug { background: radial-gradient(circle, rgba(170,190,20,0.9), transparent 70%); }
+.flash-rock { background: radial-gradient(circle, rgba(190,170,50,0.9), transparent 70%); }
+.flash-ghost { background: radial-gradient(circle, rgba(110,80,160,0.9), transparent 70%); }
+.flash-dragon { background: radial-gradient(circle, rgba(110,50,255,0.9), transparent 70%); }
+.flash-dark { background: radial-gradient(circle, rgba(110,80,60,0.9), transparent 70%); }
+.flash-steel { background: radial-gradient(circle, rgba(190,190,210,0.9), transparent 70%); }
+.flash-fairy { background: radial-gradient(circle, rgba(240,150,175,0.9), transparent 70%); }
+
+/* ── Intro animations ── */
+.intro-enemy {
+  transform: translateX(300px);
+  opacity: 0;
+  animation: slideInEnemy 0.6s 0.2s ease-out forwards;
+}
+
+.intro-player {
+  transform: scaleX(-1) translateX(300px);
+  opacity: 0;
+  animation: slideInPlayer 0.6s 0.3s ease-out forwards;
+}
+
+.intro-hud-enemy {
+  opacity: 0;
+  animation: fadeInHud 0.4s 0.5s ease-out forwards;
+}
+
+.intro-hud-player {
+  opacity: 0;
+  animation: fadeInHud 0.4s 0.6s ease-out forwards;
+}
+
+@keyframes slideInEnemy {
+  0% { transform: translateX(300px); opacity: 0; }
+  70% { transform: translateX(-10px); opacity: 1; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInPlayer {
+  0% { transform: scaleX(-1) translateX(300px); opacity: 0; }
+  70% { transform: scaleX(-1) translateX(-10px); opacity: 1; }
+  100% { transform: scaleX(-1) translateX(0); opacity: 1; }
+}
+
+@keyframes fadeInHud {
+  0% { opacity: 0; transform: translateY(-10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Attack lunge ── */
+.anim-attack-player {
+  animation: lungeRight 0.3s ease-in-out;
+}
+
+.anim-attack-enemy {
+  animation: lungeLeft 0.3s ease-in-out;
+}
+
+@keyframes lungeRight {
+  0% { transform: scaleX(-1) translateX(0); }
+  40% { transform: scaleX(-1) translateX(-40px); }
+  100% { transform: scaleX(-1) translateX(0); }
+}
+
+@keyframes lungeLeft {
+  0% { transform: translateX(0); }
+  40% { transform: translateX(40px); }
+  100% { transform: translateX(0); }
+}
+
+/* ── Shake on hit ── */
+.anim-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { filter: brightness(1); }
+  10% { transform: translateX(-6px); filter: brightness(2); }
+  20% { transform: translateX(6px); filter: brightness(1); }
+  30% { transform: translateX(-4px); filter: brightness(2); }
+  40% { transform: translateX(4px); filter: brightness(1); }
+  50% { transform: translateX(-2px); filter: brightness(1.5); }
+  60% { transform: translateX(2px); }
+  70% { transform: translateX(0); }
+}
+
+/* Override shake for player (needs scaleX) */
+.player-sprite.anim-shake {
+  animation: shakePlayer 0.4s ease-in-out;
+}
+
+@keyframes shakePlayer {
+  0%, 100% { transform: scaleX(-1); filter: brightness(1); }
+  10% { transform: scaleX(-1) translateX(-6px); filter: brightness(2); }
+  20% { transform: scaleX(-1) translateX(6px); filter: brightness(1); }
+  30% { transform: scaleX(-1) translateX(-4px); filter: brightness(2); }
+  40% { transform: scaleX(-1) translateX(4px); filter: brightness(1); }
+  50% { transform: scaleX(-1) translateX(-2px); filter: brightness(1.5); }
+  60% { transform: scaleX(-1) translateX(2px); }
+  70% { transform: scaleX(-1) translateX(0); }
+}
+
+/* ── Faint animation ── */
+.anim-faint {
+  animation: faint 0.6s ease-in forwards;
+}
+
+.player-sprite.anim-faint {
+  animation: faintPlayer 0.6s ease-in forwards;
+}
+
+@keyframes faint {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(60px); opacity: 0; }
+}
+
+@keyframes faintPlayer {
+  0% { transform: scaleX(-1) translateY(0); opacity: 1; }
+  100% { transform: scaleX(-1) translateY(60px); opacity: 0; }
+}
+
+/* ── HUD ── */
 .hud {
   position: absolute;
   background: #fff;
@@ -804,14 +1231,17 @@ onMounted(() => {
   background: #ddd;
   margin-top: 4px;
   border: 1px solid #333;
+  border-radius: 2px;
+  overflow: hidden;
 }
 
 .hp-fill {
   height: 100%;
   background: #4caf50;
-  transition: width 0.5s;
+  transition: width 0.6s ease-out, background-color 0.6s ease-out;
 }
 
+/* ── Battle menu ── */
 .battle-menu {
   height: var(--battle-panel-height);
   background: #333;

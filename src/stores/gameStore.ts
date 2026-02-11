@@ -6,7 +6,7 @@ import { createPokemonInstance, expForLevel, type PokemonInstance } from '../eng
 import { STARTERS, type PokemonSpecies, type SpeciesKey } from '../data/battle/pokemon'
 import { fetchPokemonSpecies, normalizeSpeciesKey } from '../data/pokeapi'
 import type { TypeId } from '../data/battle/types'
-import { ITEM_CATALOG, type ItemId } from '../data/items'
+import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
 import { SHOPS } from '../data/shops'
 import {
   TRAINER_SPRITES,
@@ -35,7 +35,7 @@ export type BagItem = {
 }
 
 type BattleTerrain = 'grass' | 'water' | 'default'
-type BattleOutcome = 'WIN' | 'LOSE' | 'RUN'
+type BattleOutcome = 'WIN' | 'LOSE' | 'RUN' | 'CATCH'
 
 type BattleState = {
   enemy: PokemonInstance
@@ -721,16 +721,16 @@ export const useGameStore = defineStore('game', () => {
     if (npc) npc.defeated = true
   }
 
-  function endBattle(result?: BattleOutcome) {
-    if (battle.value?.trainerId && result === 'WIN') {
-      markTrainerDefeated(battle.value.trainerId)
+    function endBattle(result?: BattleOutcome) {
+      if (battle.value?.trainerId && (result === 'WIN' || result === 'CATCH')) {
+        markTrainerDefeated(battle.value.trainerId)
+      }
+      battle.value = null
+      gameState.value = 'ROAMING'
+      encounterLock.value = false
+      battleTransition.value = null
+      pendingBattle.value = null
     }
-    battle.value = null
-    gameState.value = 'ROAMING'
-    encounterLock.value = false
-    battleTransition.value = null
-    pendingBattle.value = null
-  }
 
   function openMenu(tab?: MenuTab) {
     if (
@@ -754,24 +754,50 @@ export const useGameStore = defineStore('game', () => {
     menuTab.value = tab
   }
 
-  function useItem(itemId: ItemId, targetIndex = player.value.activeIndex) {
-    const item = bag.value.find((entry) => entry.id === itemId)
-    if (!item || item.qty <= 0) return 'No items left.'
+    function useItem(itemId: ItemId, targetIndex = player.value.activeIndex) {
+      const item = bag.value.find((entry) => entry.id === itemId)
+      if (!item || item.qty <= 0) return 'No items left.'
 
-    const target = player.value.party[targetIndex]
-    if (!target) return 'No valid target.'
+      const catalog = ITEM_CATALOG[itemId]
 
-    const catalog = ITEM_CATALOG[itemId]
-    if (catalog?.heal) {
-      if (target.currentHp >= target.stats.hp) return `${target.name} is already at full HP.`
-      const heal = Math.min(catalog.heal, target.stats.hp - target.currentHp)
-      target.currentHp += heal
-      item.qty -= 1
-      return `${target.name} recovered ${heal} HP.`
+      if (isCatchItem(itemId)) {
+        return "Use catch items through the battle catch flow."
+      }
+
+      const target = player.value.party[targetIndex]
+      if (!target) return 'No valid target.'
+
+      if (catalog?.heal) {
+        if (target.currentHp >= target.stats.hp) return `${target.name} is already at full HP.`
+        const heal = Math.min(catalog.heal, target.stats.hp - target.currentHp)
+        target.currentHp += heal
+        item.qty -= 1
+        if (item.qty <= 0) bag.value = bag.value.filter((e) => e.qty > 0)
+        return `${target.name} recovered ${heal} HP.`
+      }
+
+      return "You can't use that right now."
     }
 
-    return "You can't use that right now."
-  }
+    function useCatchItem(itemId: ItemId) {
+      const item = bag.value.find((entry) => entry.id === itemId)
+      if (!item || item.qty <= 0) return null
+      item.qty -= 1
+      if (item.qty <= 0) bag.value = bag.value.filter((e) => e.qty > 0)
+      return ITEM_CATALOG[itemId]?.catchRate ?? 1
+    }
+
+    function catchPokemon(pokemon: PokemonInstance) {
+      if (player.value.party.length < 6) {
+        pokemon.status = 'none'
+        pokemon.statusTurns = 0
+        player.value.party.push(pokemon)
+        markCaught(pokemon.species)
+        return { added: true, message: `${pokemon.name} was added to your party!` }
+      }
+      markCaught(pokemon.species)
+      return { added: false, message: `Your party is full! ${pokemon.name} was released...` }
+    }
 
   function addMoney(amount: number) {
     money.value = Math.max(0, money.value + amount)
@@ -1101,8 +1127,10 @@ export const useGameStore = defineStore('game', () => {
     openMenu,
     closeMenu,
     setMenuTab,
-    useItem,
-    addMoney,
+      useItem,
+      useCatchItem,
+      catchPokemon,
+      addMoney,
     openShop,
     closeShop,
     buyItem,

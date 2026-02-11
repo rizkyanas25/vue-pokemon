@@ -225,6 +225,46 @@ export const resolveMove = (
   return { messages, didHit: true, canAct: true }
 }
 
+export const attemptCatch = (
+  target: PokemonInstance,
+  ballRate: number,
+) => {
+  const maxHp = target.stats.hp
+  const currentHp = target.currentHp
+  const hpFactor = (3 * maxHp - 2 * currentHp) / (3 * maxHp)
+  const statusBonus = target.status === 'sleep' ? 2 : target.status === 'paralyze' ? 1.5 : target.status === 'burn' || target.status === 'poison' ? 1.5 : 1
+  const catchRate = Math.min(255, Math.floor(255 * hpFactor * ballRate * statusBonus))
+  const shakeChance = Math.floor(65536 / Math.pow(255 / catchRate, 0.1875))
+
+  let shakes = 0
+  for (let i = 0; i < 4; i++) {
+    if (Math.random() * 65536 < shakeChance) {
+      shakes++
+    } else {
+      break
+    }
+  }
+
+  const caught = shakes >= 4
+  const messages: string[] = []
+
+  if (shakes === 0) {
+    messages.push('Oh no! The Pokemon broke free!')
+  } else if (shakes === 1) {
+    messages.push('Aww! It appeared to be caught!')
+  } else if (shakes === 2) {
+    messages.push('Aargh! Almost had it!')
+  } else if (shakes === 3) {
+    messages.push('Shoot! It was so close, too!')
+  }
+
+  if (caught) {
+    messages.push(`Gotcha! ${target.name} was caught!`)
+  }
+
+  return { caught, shakes, messages }
+}
+
 export const chooseMove = (pokemon: PokemonInstance) => {
   const usableMoves = pokemon.moves.filter((move) => move.pp > 0)
   if (usableMoves.length === 0) return null

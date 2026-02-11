@@ -2,20 +2,32 @@ import { TILE, type TileId, type NpcData } from '../constants/game'
 import { trainerSprite } from './trainers'
 
 const MAP_TEMPLATE = [
-  '....bbbb......bbbb....',
-  '....bbbb====..bbbbb...',
-  '....bbbb====..~~B~..b.',
-  '....bbbb====..~~B~....',
-  '..bbbbb........bbbbb..',
-  '...######..bbb.######.',
-  '...#....#..bbb...#....',
-  '...#....#....==..#....',
-  '...######..bb==..####.',
-  '....bbbbb.....==..bbb.',
-  '....~~B~..bbb.........',
-  '....~~B~..b..####.....',
-  '....bbb....==.....bbb.',
-  '....bbbb........bbbb..',
+  '........bbbb..........bbbb.....bbbb........',
+  '..bbb...bbbb..====....bbbbb...bbb..........',
+  '..bbb...bbbb..====..~~B~..b..bbb...bbbb....',
+  '..bbb...bbbb..====..~~B~.....bbb...bbbb....',
+  '....bbbbb..........bbbb......bbbbb.........',
+  '...######..bbb.######........bbb..######...',
+  '...#....#..bbb...#....====...bbb..#....#...',
+  '...#....#....==..#.....====.......#....#...',
+  '...######..bb==..####..====..bb...######...',
+  '....bbbbb.....==..bbb........bb............',
+  '....~~B~..bbb.........bbbb...........bbb...',
+  '....~~B~..b..####.....bbbb..====.....bbb...',
+  '....bbb....==.....bbb.......====..bbb......',
+  '....bbbb........bbbb........====..bbb......',
+  '..........bbbb..........bbbb......bbb......',
+  '...bbb....bbbb..====....bbbbb..............',
+  '...bbb....bbbb..====..~~B~..b..bbbb........',
+  '...bbb............==..~~B~.....bbbb........',
+  '......bbbbb..........bbbb......bbbbb.......',
+  '....######..bbb.######........bbb..####....',
+  '....#....#..bbb...#....====...bbb..#..#....',
+  '....#....#....==..#.....====.......#..#....',
+  '....######..bb==..####..====..bb...####....',
+  '.....bbbbb.....==..bbb........bb...........',
+  '..bbb..~~B~..bbb.........bbbb.......bbb....',
+  '..bbb..~~B~..b..####.....bbbb..==...bbb....',
 ]
 
 const LEGEND: Record<string, TileId> = {
@@ -51,7 +63,7 @@ export const overworldMap = {
   tiles: parseMap(MAP_TEMPLATE),
 }
 
-export const overworldSpawn = { x: 11, y: 12 }
+export const overworldSpawn = { x: 11, y: 18 }
 
 export const overworldNpcs: NpcData[] = [
   {
@@ -67,8 +79,8 @@ export const overworldNpcs: NpcData[] = [
   {
     id: 'trainer-biker',
     name: 'Biker',
-    x: 14,
-    y: 8,
+    x: 30,
+    y: 10,
     sprite: trainerSprite('biker'),
     dialog: ['You want a battle?'],
     role: 'trainer',
@@ -78,7 +90,7 @@ export const overworldNpcs: NpcData[] = [
     id: 'merchant',
     name: 'Poke Mart',
     x: 11,
-    y: 11,
+    y: 17,
     sprite: '/sprites/Poke_Mart_FRLG.png',
     shopId: 'general',
     dialog: ['Welcome! Take a look at our goods.'],

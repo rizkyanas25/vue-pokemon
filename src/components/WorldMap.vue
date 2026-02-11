@@ -5,6 +5,8 @@ import { TileSizeKey } from '../constants/injectKeys'
 import NpcCharacter from './NpcCharacter.vue'
 import { computed, ref, onMounted, onUnmounted, provide } from 'vue'
 
+const FIXED_TILE = 48
+
 const store = useGameStore()
 const windowSize = ref({ width: window.innerWidth, height: window.innerHeight })
 
@@ -19,26 +21,51 @@ const mapWidth = computed(() => store.currentMap?.[0]?.length ?? 1)
 const mapHeight = computed(() => store.currentMap?.length ?? 1)
 
 const tileSize = computed(() => ({
-  width: windowSize.value.width / mapWidth.value,
-  height: windowSize.value.height / mapHeight.value,
+  width: FIXED_TILE,
+  height: FIXED_TILE,
 }))
 
 provide(TileSizeKey, tileSize)
 
+const totalMapWidth = computed(() => mapWidth.value * FIXED_TILE)
+const totalMapHeight = computed(() => mapHeight.value * FIXED_TILE)
+
+const cameraOffset = computed(() => {
+  const vw = windowSize.value.width
+  const vh = windowSize.value.height
+
+  const playerCenterX = (store.player.x + 0.5) * FIXED_TILE
+  const playerCenterY = (store.player.y + 0.5) * FIXED_TILE
+
+  let offsetX = vw / 2 - playerCenterX
+  let offsetY = vh / 2 - playerCenterY
+
+  // Clamp so we don't show beyond map edges
+  const minX = vw - totalMapWidth.value
+  const minY = vh - totalMapHeight.value
+
+  offsetX = Math.min(0, Math.max(minX, offsetX))
+  offsetY = Math.min(0, Math.max(minY, offsetY))
+
+  return { x: offsetX, y: offsetY }
+})
+
 const mapStyle = computed(() => ({
   display: 'grid',
-  gridTemplateColumns: `repeat(${mapWidth.value}, 1fr)`,
-  gridTemplateRows: `repeat(${mapHeight.value}, 1fr)`,
-  width: '100vw',
-  height: '100vh',
+  gridTemplateColumns: `repeat(${mapWidth.value}, ${FIXED_TILE}px)`,
+  gridTemplateRows: `repeat(${mapHeight.value}, ${FIXED_TILE}px)`,
+  width: `${totalMapWidth.value}px`,
+  height: `${totalMapHeight.value}px`,
+  transform: `translate(${cameraOffset.value.x}px, ${cameraOffset.value.y}px)`,
+  transition: 'transform 0.2s linear',
 }))
 
 const getTileColor = (type: number) => TILE_COLORS[type as TileId] ?? '#000'
 
-const getTileStyle = (tile: TileId, width: number, height: number) => {
+const getTileStyle = (tile: TileId) => {
   const style: Record<string, string> = {
-    width: `${width}px`,
-    height: `${height}px`,
+    width: `${FIXED_TILE}px`,
+    height: `${FIXED_TILE}px`,
     backgroundColor: getTileColor(tile),
   }
 
@@ -67,9 +94,8 @@ const getTileStyle = (tile: TileId, width: number, height: number) => {
           v-for="(tile, x) in row"
           :key="`${x}-${y}`"
           class="tile"
-          :style="getTileStyle(tile, tileSize.width, tileSize.height)"
+          :style="getTileStyle(tile)"
         >
-          <!-- Optional: Render tile image here if we had them -->
           <span v-if="tile === TILE.GRASS" class="grass-detail">.</span>
           <span v-if="tile === TILE.WALL" class="wall-detail">#</span>
           <span v-if="tile === TILE.WATER" class="water-detail">~</span>
@@ -91,9 +117,6 @@ const getTileStyle = (tile: TileId, width: number, height: number) => {
   overflow: hidden;
   background: #000;
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .map-row {
@@ -101,7 +124,9 @@ const getTileStyle = (tile: TileId, width: number, height: number) => {
 }
 
 .world-map {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 .tile {
