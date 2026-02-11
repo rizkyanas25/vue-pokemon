@@ -58,7 +58,7 @@ const parseMap = (rows: string[]): TileId[][] => {
 
 export const overworldMap = {
   name: 'Route 1',
-  width: MAP_TEMPLATE[0].length,
+  width: MAP_TEMPLATE[0]?.length ?? 0,
   height: MAP_TEMPLATE.length,
   tiles: parseMap(MAP_TEMPLATE),
 }

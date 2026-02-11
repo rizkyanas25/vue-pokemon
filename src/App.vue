@@ -11,6 +11,8 @@ import LoadingOverlay from './components/LoadingOverlay.vue'
 import ShopMenu from './components/ShopMenu.vue'
 import TrainerSelect from './components/TrainerSelect.vue'
 import BattleTransition from './components/BattleTransition.vue'
+import MiniMap from './components/MiniMap.vue'
+import VirtualControls from './components/VirtualControls.vue'
 
 const store = useGameStore()
 
@@ -94,16 +96,22 @@ onUnmounted(() => {
     <div class="ui-overlay">
       <h1>Pokevue</h1>
       <p v-if="store.gameState === 'ROAMING'">
-        Move with Arrow Keys, talk with Enter/Space, menu with M/Esc
+        <span class="desktop-hint"
+          >Move with Arrow Keys, talk with Enter/Space, menu with M/Esc</span
+        >
+        <span class="mobile-hint">Use D-Pad to move, A to interact, B for menu</span>
       </p>
       <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
       <p v-else-if="store.gameState === 'MENU'">Menu</p>
-      <p v-else-if="store.gameState === 'STARTER'">Choose your starter</p>
-      <p v-else-if="store.gameState === 'TRAINER_SELECT'">Choose your trainer</p>
-      <p v-else-if="store.gameState === 'TRANSITION'">Encounter!</p>
-      <p v-else-if="store.gameState === 'SHOP'">Shop</p>
-      <p v-else>Battle Mode!</p>
     </div>
+
+    <!-- Minimap Overlay -->
+    <div class="minimap-overlay" v-if="store.gameState === 'ROAMING'">
+      <MiniMap />
+    </div>
+
+    <!-- Mobile Controls -->
+    <VirtualControls v-if="store.gameState === 'ROAMING'" />
 
     <div class="viewport">
       <template v-if="store.gameState !== 'BATTLE'">
@@ -146,14 +154,23 @@ body {
 .ui-overlay {
   position: absolute;
   top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 20px;
+  /* Removed centering */
   z-index: 100;
-  text-align: center;
+  text-align: right;
   background: rgba(0, 0, 0, 0.5);
   padding: 10px;
   border-radius: 8px;
   pointer-events: none; /* Allow clicking through to map if needed */
+  max-width: 300px; /* Prevent it from getting too wide on small screens */
+}
+
+.minimap-overlay {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 90;
+  pointer-events: none;
 }
 
 .viewport {
@@ -161,5 +178,22 @@ body {
   height: 100%;
   overflow: hidden;
   background-color: #000;
+}
+
+.desktop-hint {
+  display: inline;
+}
+.mobile-hint {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .desktop-hint {
+    display: none;
+  }
+
+  .mobile-hint {
+    display: inline;
+  }
 }
 </style>

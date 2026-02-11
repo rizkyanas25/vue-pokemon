@@ -139,7 +139,9 @@ export const useGameStore = defineStore('game', () => {
     const normalized = normalizeSpeciesKey(keyOrId)
     return (
       speciesCache.value[normalized] ??
-      Object.values(speciesCache.value).find((species) => species.name.toLowerCase() === normalized) ??
+      Object.values(speciesCache.value).find(
+        (species) => species.name.toLowerCase() === normalized,
+      ) ??
       null
     )
   }
@@ -165,7 +167,7 @@ export const useGameStore = defineStore('game', () => {
     const starterFallback =
       typeof keyOrId === 'string'
         ? getStarterByKey(normalizeSpeciesKey(keyOrId))
-        : STARTERS.find((starter) => starter.species.id === keyOrId) ?? null
+        : (STARTERS.find((starter) => starter.species.id === keyOrId) ?? null)
 
     try {
       const species = await fetchPokemonSpecies(keyOrId)
@@ -454,9 +456,11 @@ export const useGameStore = defineStore('game', () => {
     const height = tiles.length
     const width = tiles[0]?.length ?? 0
     for (let y = 1; y < height - 1; y += 1) {
+      const row = tiles[y]
+      if (!row) continue
       let runStart = -1
       for (let x = 1; x <= width; x += 1) {
-        const isWater = x < width && tiles[y]?.[x] === TILE.WATER
+        const isWater = x < width && row[x] === TILE.WATER
         if (isWater && runStart === -1) {
           runStart = x
           continue
@@ -467,7 +471,7 @@ export const useGameStore = defineStore('game', () => {
             const bridgeLength = Math.min(3, runLength)
             const start = runStart + Math.floor((runLength - bridgeLength) / 2)
             for (let i = 0; i < bridgeLength; i += 1) {
-              tiles[y][start + i] = TILE.BRIDGE
+              row[start + i] = TILE.BRIDGE
             }
           }
           runStart = -1
@@ -494,7 +498,9 @@ export const useGameStore = defineStore('game', () => {
       const npc = createTrainerNpc(key, tiles, npcList, reachable)
       if (npc) npcList.push(npc)
     }
-    const filtered = npcList.filter((npc) => !isTrainerNpc(npc) || reachable.has(`${npc.x},${npc.y}`))
+    const filtered = npcList.filter(
+      (npc) => !isTrainerNpc(npc) || reachable.has(`${npc.x},${npc.y}`),
+    )
     npcCache.value[key] = filtered
     return key
   }
@@ -502,7 +508,7 @@ export const useGameStore = defineStore('game', () => {
   const setCurrentMap = (x: number, y: number) => {
     const key = ensureMapAt(x, y)
     worldPos.value = { x, y }
-    currentMap.value = mapCache.value[key]
+    currentMap.value = mapCache.value[key] ?? overworldMap.tiles
     const reachable = buildReachableSet(currentMap.value)
     const npcList = (npcCache.value[key] ?? []).filter(
       (npc) => !isTrainerNpc(npc) || reachable.has(`${npc.x},${npc.y}`),
@@ -640,13 +646,19 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function startTrainerBattle(npc: NpcData, tile?: TileId) {
-    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value) return Promise.resolve()
-    if (!player.value.party[player.value.activeIndex]) return Promise.resolve()
+    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value)
+      return Promise.resolve()
+    const activePokemon = player.value.party[player.value.activeIndex]
+    if (!activePokemon) return Promise.resolve()
 
-    const enemyLevel = Math.max(2, player.value.party[player.value.activeIndex].level)
+    const enemyLevel = Math.max(2, activePokemon.level)
     const foeLookup = npc.pokemonId ?? npc.pokemonKey ?? Math.floor(Math.random() * 151) + 1
     const terrain: BattleTerrain =
-      tile === TILE.WATER ? 'water' : tile === TILE.GRASS || tile === TILE.BUSH ? 'grass' : 'default'
+      tile === TILE.WATER
+        ? 'water'
+        : tile === TILE.GRASS || tile === TILE.BUSH
+          ? 'grass'
+          : 'default'
 
     queueBattle(
       {
@@ -672,13 +684,15 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function startWildBattle(tile?: TileId) {
-    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value) return Promise.resolve()
-    if (!player.value.party[player.value.activeIndex]) return Promise.resolve()
+    if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value)
+      return Promise.resolve()
+    const activePokemon = player.value.party[player.value.activeIndex]
+    if (!activePokemon) return Promise.resolve()
 
     const wantsLegendary = Math.random() < LEGENDARY_CHANCE
     let randomId = Math.floor(Math.random() * 151) + 1
     if (wantsLegendary) {
-      randomId = LEGENDARY_POOL[Math.floor(Math.random() * LEGENDARY_POOL.length)]
+      randomId = LEGENDARY_POOL[Math.floor(Math.random() * LEGENDARY_POOL.length)] ?? 150
     } else {
       while (LEGENDARY_IDS.has(randomId)) {
         randomId = Math.floor(Math.random() * 151) + 1
@@ -686,10 +700,14 @@ export const useGameStore = defineStore('game', () => {
     }
     const isLegendary = LEGENDARY_IDS.has(randomId)
     const enemyLevel = isLegendary
-      ? Math.max(50, player.value.party[player.value.activeIndex].level)
-      : Math.max(2, player.value.party[player.value.activeIndex].level - 1)
+      ? Math.max(50, activePokemon.level)
+      : Math.max(2, activePokemon.level - 1)
     const terrain: BattleTerrain =
-      tile === TILE.WATER ? 'water' : tile === TILE.GRASS || tile === TILE.BUSH ? 'grass' : 'default'
+      tile === TILE.WATER
+        ? 'water'
+        : tile === TILE.GRASS || tile === TILE.BUSH
+          ? 'grass'
+          : 'default'
 
     queueBattle(
       {
@@ -705,10 +723,7 @@ export const useGameStore = defineStore('game', () => {
     if (isLegendary) {
       dialog.value = {
         speaker: '???',
-        lines: [
-          'A legendary Pokemon is chasing you!',
-          "You can't run away!",
-        ],
+        lines: ['A legendary Pokemon is chasing you!', "You can't run away!"],
         index: 0,
       }
       gameState.value = 'DIALOG'
@@ -721,16 +736,16 @@ export const useGameStore = defineStore('game', () => {
     if (npc) npc.defeated = true
   }
 
-    function endBattle(result?: BattleOutcome) {
-      if (battle.value?.trainerId && (result === 'WIN' || result === 'CATCH')) {
-        markTrainerDefeated(battle.value.trainerId)
-      }
-      battle.value = null
-      gameState.value = 'ROAMING'
-      encounterLock.value = false
-      battleTransition.value = null
-      pendingBattle.value = null
+  function endBattle(result?: BattleOutcome) {
+    if (battle.value?.trainerId && (result === 'WIN' || result === 'CATCH')) {
+      markTrainerDefeated(battle.value.trainerId)
     }
+    battle.value = null
+    gameState.value = 'ROAMING'
+    encounterLock.value = false
+    battleTransition.value = null
+    pendingBattle.value = null
+  }
 
   function openMenu(tab?: MenuTab) {
     if (
@@ -754,50 +769,50 @@ export const useGameStore = defineStore('game', () => {
     menuTab.value = tab
   }
 
-    function useItem(itemId: ItemId, targetIndex = player.value.activeIndex) {
-      const item = bag.value.find((entry) => entry.id === itemId)
-      if (!item || item.qty <= 0) return 'No items left.'
+  function useItem(itemId: ItemId, targetIndex = player.value.activeIndex) {
+    const item = bag.value.find((entry) => entry.id === itemId)
+    if (!item || item.qty <= 0) return 'No items left.'
 
-      const catalog = ITEM_CATALOG[itemId]
+    const catalog = ITEM_CATALOG[itemId]
 
-      if (isCatchItem(itemId)) {
-        return "Use catch items through the battle catch flow."
-      }
-
-      const target = player.value.party[targetIndex]
-      if (!target) return 'No valid target.'
-
-      if (catalog?.heal) {
-        if (target.currentHp >= target.stats.hp) return `${target.name} is already at full HP.`
-        const heal = Math.min(catalog.heal, target.stats.hp - target.currentHp)
-        target.currentHp += heal
-        item.qty -= 1
-        if (item.qty <= 0) bag.value = bag.value.filter((e) => e.qty > 0)
-        return `${target.name} recovered ${heal} HP.`
-      }
-
-      return "You can't use that right now."
+    if (isCatchItem(itemId)) {
+      return 'Use catch items through the battle catch flow.'
     }
 
-    function useCatchItem(itemId: ItemId) {
-      const item = bag.value.find((entry) => entry.id === itemId)
-      if (!item || item.qty <= 0) return null
+    const target = player.value.party[targetIndex]
+    if (!target) return 'No valid target.'
+
+    if (catalog?.heal) {
+      if (target.currentHp >= target.stats.hp) return `${target.name} is already at full HP.`
+      const heal = Math.min(catalog.heal, target.stats.hp - target.currentHp)
+      target.currentHp += heal
       item.qty -= 1
       if (item.qty <= 0) bag.value = bag.value.filter((e) => e.qty > 0)
-      return ITEM_CATALOG[itemId]?.catchRate ?? 1
+      return `${target.name} recovered ${heal} HP.`
     }
 
-    function catchPokemon(pokemon: PokemonInstance) {
-      if (player.value.party.length < 6) {
-        pokemon.status = 'none'
-        pokemon.statusTurns = 0
-        player.value.party.push(pokemon)
-        markCaught(pokemon.species)
-        return { added: true, message: `${pokemon.name} was added to your party!` }
-      }
+    return "You can't use that right now."
+  }
+
+  function useCatchItem(itemId: ItemId) {
+    const item = bag.value.find((entry) => entry.id === itemId)
+    if (!item || item.qty <= 0) return null
+    item.qty -= 1
+    if (item.qty <= 0) bag.value = bag.value.filter((e) => e.qty > 0)
+    return ITEM_CATALOG[itemId]?.catchRate ?? 1
+  }
+
+  function catchPokemon(pokemon: PokemonInstance) {
+    if (player.value.party.length < 6) {
+      pokemon.status = 'none'
+      pokemon.statusTurns = 0
+      player.value.party.push(pokemon)
       markCaught(pokemon.species)
-      return { added: false, message: `Your party is full! ${pokemon.name} was released...` }
+      return { added: true, message: `${pokemon.name} was added to your party!` }
     }
+    markCaught(pokemon.species)
+    return { added: false, message: `Your party is full! ${pokemon.name} was released...` }
+  }
 
   function addMoney(amount: number) {
     money.value = Math.max(0, money.value + amount)
@@ -852,7 +867,9 @@ export const useGameStore = defineStore('game', () => {
 
   function normalizePokemon(pokemon: PokemonInstance): PokemonInstance {
     const fallbackKey =
-      (pokemon as unknown as { speciesId?: string }).speciesId ?? pokemon.species?.key ?? pokemon.name?.toLowerCase()
+      (pokemon as unknown as { speciesId?: string }).speciesId ??
+      pokemon.species?.key ??
+      pokemon.name?.toLowerCase()
     const starterFallback = fallbackKey ? getStarterByKey(normalizeSpeciesKey(fallbackKey)) : null
     const species =
       pokemon.species ??
@@ -929,13 +946,23 @@ export const useGameStore = defineStore('game', () => {
         player.value.activeIndex = 0
       }
 
-      const rawBag = Array.isArray(data.bag) ? data.bag : []
+      const rawBag: unknown[] = Array.isArray(data.bag) ? data.bag : []
       bag.value = rawBag
-        .map((entry: Partial<BagItem> & { id?: ItemId }) => ({
-          id: (entry.id ?? 'potion') as ItemId,
-          qty: entry.qty ?? 1,
-        }))
-        .filter((entry) => ITEM_CATALOG[entry.id])
+        .map((entry): BagItem | null => {
+          if (!entry || typeof entry !== 'object') return null
+          const rawEntry = entry as Partial<BagItem> & { id?: ItemId }
+          const itemId = rawEntry.id ?? 'potion'
+          if (!ITEM_CATALOG[itemId]) return null
+          const quantity =
+            typeof rawEntry.qty === 'number' && Number.isFinite(rawEntry.qty) && rawEntry.qty > 0
+              ? Math.floor(rawEntry.qty)
+              : 1
+          return {
+            id: itemId,
+            qty: quantity,
+          }
+        })
+        .filter((entry): entry is BagItem => entry !== null)
 
       if (bag.value.length === 0) {
         bag.value = [
@@ -954,16 +981,19 @@ export const useGameStore = defineStore('game', () => {
       }
 
       const shouldResetMaps = data.mapVersion !== MAP_VERSION
-      mapCache.value = shouldResetMaps ? {} : data.mapCache ?? mapCache.value
-      npcCache.value = shouldResetMaps ? {} : data.npcCache ?? npcCache.value
+      mapCache.value = shouldResetMaps ? {} : (data.mapCache ?? mapCache.value)
+      npcCache.value = shouldResetMaps ? {} : (data.npcCache ?? npcCache.value)
 
       setCurrentMap(worldPos.value.x, worldPos.value.y)
       ensurePlayerOnWalkable()
       const rawDex = data.pokedex ?? {}
-      pokedex.value = Object.entries(rawDex).reduce((acc, [key, entry]) => {
-        acc[normalizeSpeciesKey(key)] = normalizeDexEntry(key, entry as Partial<DexEntry>)
-        return acc
-      }, {} as Record<string, DexEntry>)
+      pokedex.value = Object.entries(rawDex).reduce(
+        (acc, [key, entry]) => {
+          acc[normalizeSpeciesKey(key)] = normalizeDexEntry(key, entry as Partial<DexEntry>)
+          return acc
+        },
+        {} as Record<string, DexEntry>,
+      )
       speciesCache.value = data.speciesCache ?? {}
 
       hasSaveData.value = true
@@ -1021,7 +1051,7 @@ export const useGameStore = defineStore('game', () => {
       const lookup =
         pokemon.species?.id && pokemon.species.id > 0
           ? pokemon.species.id
-          : pokemon.species?.key ?? pokemon.name
+          : (pokemon.species?.key ?? pokemon.name)
       const species = await ensureSpecies(lookup)
       pokemon.species = species
       pokemon.name = pokemon.name ?? species.name
@@ -1127,10 +1157,10 @@ export const useGameStore = defineStore('game', () => {
     openMenu,
     closeMenu,
     setMenuTab,
-      useItem,
-      useCatchItem,
-      catchPokemon,
-      addMoney,
+    useItem,
+    useCatchItem,
+    catchPokemon,
+    addMoney,
     openShop,
     closeShop,
     buyItem,
@@ -1139,5 +1169,7 @@ export const useGameStore = defineStore('game', () => {
     bootstrap,
     chooseStarter,
     chooseTrainer,
+    worldPos,
+    mapCache,
   }
 })

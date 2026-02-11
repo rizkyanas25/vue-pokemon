@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getMoveData } from '../data/battle/moves'
 import { applyExperience, resetBattleStages } from '../engine/pokemon'
@@ -32,7 +32,9 @@ interface QueueEntry {
 
 const store = useGameStore()
 
-const playerPokemon = computed(() => store.player.party[store.player.activeIndex])
+const playerPokemon = computed<PokemonInstance | null>(
+  () => store.player.party[store.player.activeIndex] ?? null,
+)
 const enemyPokemon = computed(() => store.battle?.enemy ?? null)
 const trainerSprite = computed(() => store.battle?.trainerSprite ?? '')
 const trainerName = computed(() => store.battle?.trainerName ?? 'Trainer')
@@ -65,7 +67,7 @@ const playerShaking = ref(false)
 const enemyShaking = ref(false)
 const playerFainting = ref(false)
 const enemyFainting = ref(false)
-const flashType = ref('')        // move type for color overlay on target
+const flashType = ref('') // move type for color overlay on target
 const flashSide = ref<'player' | 'enemy' | ''>('') // which side gets flashed
 
 // Delayed HP display for smooth animation sync
@@ -90,7 +92,7 @@ const clampIndex = (value: number, max: number) => {
 }
 
 /* ── Animation helpers ── */
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const triggerAttack = async (side: 'player' | 'enemy') => {
   if (side === 'player') {
@@ -135,14 +137,14 @@ const triggerFaint = async (side: 'player' | 'enemy') => {
 
 /* ── Message queue with animation support ── */
 const queueEntries = (entries: QueueEntry[]) => {
-  const filtered = entries.filter(e => e.text)
+  const filtered = entries.filter((e) => e.text)
   if (filtered.length === 0) return
   messageQueue.value.push(...filtered)
   if (!currentMessage.value) showNextMessage()
 }
 
 const queueMessages = (messages: string[]) => {
-  queueEntries(messages.map(text => ({ text })))
+  queueEntries(messages.map((text) => ({ text })))
 }
 
 const showNextMessage = () => {
@@ -190,12 +192,22 @@ const hpBarColor = (hp: number, maxHp: number) => {
   return '#e53935'
 }
 
-const playerHpPct = computed(() => hpPercent(displayPlayerHp.value, playerPokemon.value?.stats.hp ?? 1))
-const enemyHpPct = computed(() => hpPercent(displayEnemyHp.value, enemyPokemon.value?.stats.hp ?? 1))
-const playerHpColor = computed(() => hpBarColor(displayPlayerHp.value, playerPokemon.value?.stats.hp ?? 1))
-const enemyHpColor = computed(() => hpBarColor(displayEnemyHp.value, enemyPokemon.value?.stats.hp ?? 1))
+const playerHpPct = computed(() =>
+  hpPercent(displayPlayerHp.value, playerPokemon.value?.stats.hp ?? 1),
+)
+const enemyHpPct = computed(() =>
+  hpPercent(displayEnemyHp.value, enemyPokemon.value?.stats.hp ?? 1),
+)
+const playerHpColor = computed(() =>
+  hpBarColor(displayPlayerHp.value, playerPokemon.value?.stats.hp ?? 1),
+)
+const enemyHpColor = computed(() =>
+  hpBarColor(displayEnemyHp.value, enemyPokemon.value?.stats.hp ?? 1),
+)
 
-const playerStatus = computed(() => getStatusLabel(playerPokemon.value.status))
+const playerStatus = computed(() =>
+  playerPokemon.value ? getStatusLabel(playerPokemon.value.status) : '',
+)
 const enemyStatus = computed(() =>
   enemyPokemon.value ? getStatusLabel(enemyPokemon.value.status) : '',
 )
@@ -205,26 +217,25 @@ const getTypes = (pokemon: PokemonInstance | null) => {
   return types.length ? types : ['unknown']
 }
 
-const playerTypes = computed(() => getTypes(playerPokemon.value))
+const playerTypes = computed(() => getTypes(playerPokemon.value ?? null))
 const enemyTypes = computed(() => getTypes(enemyPokemon.value))
 
 const battleBackgroundStyle = computed(() => {
   const terrain = store.battle?.terrain ?? 'grass'
+  const split = 'var(--battle-split, 50%)'
+
   if (terrain === 'water') {
     return {
-      backgroundImage:
-        'linear-gradient(to bottom, #cfefff 0%, #cfefff 50%, #4a90e2 50%, #4a90e2 100%)',
+      backgroundImage: `linear-gradient(to bottom, #cfefff 0%, #cfefff ${split}, #4a90e2 ${split}, #4a90e2 100%)`,
     }
   }
   if (terrain === 'default') {
     return {
-      backgroundImage:
-        'linear-gradient(to bottom, #e5e5e5 0%, #e5e5e5 50%, #a0a0a0 50%, #a0a0a0 100%)',
+      backgroundImage: `linear-gradient(to bottom, #e5e5e5 0%, #e5e5e5 ${split}, #a0a0a0 ${split}, #a0a0a0 100%)`,
     }
   }
   return {
-    backgroundImage:
-      'linear-gradient(to bottom, #d0f8d0 0%, #d0f8d0 50%, #70b870 50%, #70b870 100%)',
+    backgroundImage: `linear-gradient(to bottom, #d0f8d0 0%, #d0f8d0 ${split}, #70b870 ${split}, #70b870 100%)`,
   }
 })
 
@@ -245,8 +256,22 @@ const resolveTurn = (playerMoveState: MoveState) => {
   const enemyMove = enemyMoveState ? getMoveDataFromState(enemyMoveState) : null
 
   const actions = [
-    { actor: player, target: enemy, move: playerMove, moveState: playerMoveState, side: 'player' as const },
-    enemyMove ? { actor: enemy, target: player, move: enemyMove, moveState: enemyMoveState, side: 'enemy' as const } : null,
+    {
+      actor: player,
+      target: enemy,
+      move: playerMove,
+      moveState: playerMoveState,
+      side: 'player' as const,
+    },
+    enemyMove
+      ? {
+          actor: enemy,
+          target: player,
+          move: enemyMove,
+          moveState: enemyMoveState,
+          side: 'enemy' as const,
+        }
+      : null,
   ].filter(Boolean) as Array<{
     actor: PokemonInstance
     target: PokemonInstance
@@ -290,8 +315,8 @@ const resolveTurn = (playerMoveState: MoveState) => {
     const hasResultMessages = result.messages.length > 0
 
     if (hasResultMessages) {
-      const firstMsg = result.messages[0]
-      const restMsgs = result.messages.slice(1)
+      const [firstMsg, ...restMsgs] = result.messages
+      if (!firstMsg) continue
 
       entries.push({
         text: firstMsg,
@@ -352,22 +377,42 @@ const resolveTurn = (playerMoveState: MoveState) => {
   } else {
     const endEntries: QueueEntry[] = []
     const playerEnd = applyEndOfTurnStatus(player)
-    if (playerEnd.message) endEntries.push({
-      text: playerEnd.message,
-      onShow: () => { syncHp(); if (player.currentHp > 0) triggerShake('player') },
-    })
+    if (playerEnd.message)
+      endEntries.push({
+        text: playerEnd.message,
+        onShow: () => {
+          syncHp()
+          if (player.currentHp > 0) triggerShake('player')
+        },
+      })
     const enemyEnd = applyEndOfTurnStatus(enemy)
-    if (enemyEnd.message) endEntries.push({
-      text: enemyEnd.message,
-      onShow: () => { syncHp(); if (enemy.currentHp > 0) triggerShake('enemy') },
-    })
+    if (enemyEnd.message)
+      endEntries.push({
+        text: enemyEnd.message,
+        onShow: () => {
+          syncHp()
+          if (enemy.currentHp > 0) triggerShake('enemy')
+        },
+      })
 
     if (player.currentHp <= 0) {
-      endEntries.push({ text: `${player.name} fainted...`, onShow: () => { syncHp(); triggerFaint('player') } })
+      endEntries.push({
+        text: `${player.name} fainted...`,
+        onShow: () => {
+          syncHp()
+          triggerFaint('player')
+        },
+      })
       pendingEnd.value = 'LOSE'
     }
     if (enemy.currentHp <= 0) {
-      endEntries.push({ text: `${enemy.name} fainted!`, onShow: () => { syncHp(); triggerFaint('enemy') } })
+      endEntries.push({
+        text: `${enemy.name} fainted!`,
+        onShow: () => {
+          syncHp()
+          triggerFaint('enemy')
+        },
+      })
       pendingEnd.value = 'WIN'
     }
 
@@ -405,17 +450,20 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
     }
 
     if (result.messages.length > 0) {
-      entries.push({
-        text: result.messages[0],
-        onShow: () => {
-          if (damageDealt > 0) {
-            triggerFlash('player', enemyMove.type)
-            triggerShake('player')
-          }
-          syncHp()
-        },
-      })
-      for (const msg of result.messages.slice(1)) {
+      const [firstMsg, ...restMessages] = result.messages
+      if (firstMsg) {
+        entries.push({
+          text: firstMsg,
+          onShow: () => {
+            if (damageDealt > 0) {
+              triggerFlash('player', enemyMove.type)
+              triggerShake('player')
+            }
+            syncHp()
+          },
+        })
+      }
+      for (const msg of restMessages) {
         entries.push({ text: msg, onShow: syncHp })
       }
     } else if (damageDealt > 0) {
@@ -437,21 +485,53 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
   }
 
   if (player.currentHp <= 0) {
-    entries.push({ text: `${player.name} fainted...`, onShow: () => { syncHp(); triggerFaint('player') } })
+    entries.push({
+      text: `${player.name} fainted...`,
+      onShow: () => {
+        syncHp()
+        triggerFaint('player')
+      },
+    })
     pendingEnd.value = 'LOSE'
   } else {
     const endEntries: QueueEntry[] = []
     const playerEnd = applyEndOfTurnStatus(player)
-    if (playerEnd.message) endEntries.push({ text: playerEnd.message, onShow: () => { syncHp(); triggerShake('player') } })
+    if (playerEnd.message)
+      endEntries.push({
+        text: playerEnd.message,
+        onShow: () => {
+          syncHp()
+          triggerShake('player')
+        },
+      })
     const enemyEnd = applyEndOfTurnStatus(enemy)
-    if (enemyEnd.message) endEntries.push({ text: enemyEnd.message, onShow: () => { syncHp(); triggerShake('enemy') } })
+    if (enemyEnd.message)
+      endEntries.push({
+        text: enemyEnd.message,
+        onShow: () => {
+          syncHp()
+          triggerShake('enemy')
+        },
+      })
 
     if (player.currentHp <= 0) {
-      endEntries.push({ text: `${player.name} fainted...`, onShow: () => { syncHp(); triggerFaint('player') } })
+      endEntries.push({
+        text: `${player.name} fainted...`,
+        onShow: () => {
+          syncHp()
+          triggerFaint('player')
+        },
+      })
       pendingEnd.value = 'LOSE'
     }
     if (enemy.currentHp <= 0) {
-      endEntries.push({ text: `${enemy.name} fainted!`, onShow: () => { syncHp(); triggerFaint('enemy') } })
+      endEntries.push({
+        text: `${enemy.name} fainted!`,
+        onShow: () => {
+          syncHp()
+          triggerFaint('enemy')
+        },
+      })
       pendingEnd.value = 'WIN'
     }
 
@@ -599,8 +679,10 @@ const handleMoveNavigation = (key: string) => {
 
 const handleUtilityNavigation = (key: string) => {
   const max = 3
-  if (key === 'ArrowLeft') selectedUtilityIndex.value = clampIndex(selectedUtilityIndex.value - 1, max)
-  if (key === 'ArrowRight') selectedUtilityIndex.value = clampIndex(selectedUtilityIndex.value + 1, max)
+  if (key === 'ArrowLeft')
+    selectedUtilityIndex.value = clampIndex(selectedUtilityIndex.value - 1, max)
+  if (key === 'ArrowRight')
+    selectedUtilityIndex.value = clampIndex(selectedUtilityIndex.value + 1, max)
   if (key === 'ArrowUp') mainSection.value = 'moves'
 }
 
@@ -667,8 +749,9 @@ const handleBattleKeydown = (e: KeyboardEvent) => {
       handleGridNavigation(key, store.bag.length, selectedBagIndex)
       return
     }
-    if (isConfirm && store.bag[selectedBagIndex.value]) {
-      useBattleItem(store.bag[selectedBagIndex.value].id)
+    if (isConfirm) {
+      const selectedItem = store.bag[selectedBagIndex.value]
+      if (selectedItem) useBattleItem(selectedItem.id)
       return
     }
     if (isCancel) backToMain()
@@ -743,12 +826,7 @@ onMounted(() => {
           <span v-if="enemyStatus" class="status">{{ enemyStatus }}</span>
         </div>
         <div class="types">
-          <span
-            v-for="type in enemyTypes"
-            :key="type"
-            class="type-badge"
-            :class="`type-${type}`"
-          >
+          <span v-for="type in enemyTypes" :key="type" class="type-badge" :class="`type-${type}`">
             {{ type === 'unknown' ? '???' : type.toUpperCase() }}
           </span>
         </div>
@@ -771,6 +849,7 @@ onMounted(() => {
           'anim-shake': enemyShaking,
           'anim-faint': enemyFainting,
           'anim-attack-enemy': enemyAttacking,
+          'is-wild': !isTrainerBattle,
         }"
       >
         <!-- Type flash overlay -->
@@ -817,12 +896,7 @@ onMounted(() => {
           <span v-if="playerStatus" class="status">{{ playerStatus }}</span>
         </div>
         <div class="types">
-          <span
-            v-for="type in playerTypes"
-            :key="type"
-            class="type-badge"
-            :class="`type-${type}`"
-          >
+          <span v-for="type in playerTypes" :key="type" class="type-badge" :class="`type-${type}`">
             {{ type === 'unknown' ? '???' : type.toUpperCase() }}
           </span>
         </div>
@@ -854,9 +928,7 @@ onMounted(() => {
               class="move-button"
               :class="{
                 'is-active':
-                  menuMode === 'MAIN' &&
-                  mainSection === 'moves' &&
-                  selectedMoveIndex === moveIndex,
+                  menuMode === 'MAIN' && mainSection === 'moves' && selectedMoveIndex === moveIndex,
               }"
               :disabled="moveState.pp <= 0"
               @click="selectMove(moveState)"
@@ -870,19 +942,28 @@ onMounted(() => {
           </div>
           <div class="utility">
             <button
-              :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 0 }"
+              :class="{
+                'is-active':
+                  menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 0,
+              }"
               @click="openBag"
             >
               BAG
             </button>
             <button
-              :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 1 }"
+              :class="{
+                'is-active':
+                  menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 1,
+              }"
               @click="openParty"
             >
               POKEMON
             </button>
             <button
-              :class="{ 'is-active': menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 2 }"
+              :class="{
+                'is-active':
+                  menuMode === 'MAIN' && mainSection === 'utility' && selectedUtilityIndex === 2,
+              }"
               @click="run"
               :disabled="store.battle?.isLegendary"
             >
@@ -945,6 +1026,9 @@ onMounted(() => {
   font-family: 'Press Start 2P', cursive;
   z-index: 200;
   background-color: #f8f8f8;
+
+  /* Desktop split: (100vh - 200px (panel height)) / 2 */
+  --battle-split: calc((100vh - 200px) / 2);
 }
 
 .battle-arena {
@@ -956,7 +1040,9 @@ onMounted(() => {
 /* ── Sprite containers ── */
 .sprite-container {
   position: absolute;
-  transition: transform 0.3s ease, opacity 0.3s ease;
+  transition:
+    transform 0.3s ease,
+    opacity 0.3s ease;
 }
 .sprite-container img {
   width: 144px;
@@ -997,6 +1083,12 @@ onMounted(() => {
   z-index: 2;
 }
 
+.enemy-sprite.is-wild {
+  /* Position further to the right on desktop if wild (no trainer) */
+  right: 12%;
+  transform: translateX(0);
+}
+
 .player-sprite {
   bottom: 20px;
   left: 140px;
@@ -1016,28 +1108,90 @@ onMounted(() => {
 }
 
 @keyframes flashPulse {
-  0% { opacity: 0.9; }
-  100% { opacity: 0; }
+  0% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
-.flash-normal { background: radial-gradient(circle, rgba(168,168,120,0.8), transparent 70%); }
-.flash-fire { background: radial-gradient(circle, rgba(255,100,30,0.9), transparent 70%); }
-.flash-water { background: radial-gradient(circle, rgba(80,144,255,0.9), transparent 70%); }
-.flash-electric { background: radial-gradient(circle, rgba(255,220,30,0.9), transparent 70%); }
-.flash-grass { background: radial-gradient(circle, rgba(100,210,60,0.9), transparent 70%); }
-.flash-ice { background: radial-gradient(circle, rgba(150,220,230,0.9), transparent 70%); }
-.flash-fighting { background: radial-gradient(circle, rgba(200,40,30,0.9), transparent 70%); }
-.flash-poison { background: radial-gradient(circle, rgba(170,50,170,0.9), transparent 70%); }
-.flash-ground { background: radial-gradient(circle, rgba(230,190,90,0.9), transparent 70%); }
-.flash-flying { background: radial-gradient(circle, rgba(170,140,255,0.9), transparent 70%); }
-.flash-psychic { background: radial-gradient(circle, rgba(255,80,140,0.9), transparent 70%); }
-.flash-bug { background: radial-gradient(circle, rgba(170,190,20,0.9), transparent 70%); }
-.flash-rock { background: radial-gradient(circle, rgba(190,170,50,0.9), transparent 70%); }
-.flash-ghost { background: radial-gradient(circle, rgba(110,80,160,0.9), transparent 70%); }
-.flash-dragon { background: radial-gradient(circle, rgba(110,50,255,0.9), transparent 70%); }
-.flash-dark { background: radial-gradient(circle, rgba(110,80,60,0.9), transparent 70%); }
-.flash-steel { background: radial-gradient(circle, rgba(190,190,210,0.9), transparent 70%); }
-.flash-fairy { background: radial-gradient(circle, rgba(240,150,175,0.9), transparent 70%); }
+.flash-normal {
+  background: radial-gradient(circle, rgba(168, 168, 120, 0.8), transparent 70%);
+}
+.flash-fire {
+  background: radial-gradient(circle, rgba(255, 100, 30, 0.9), transparent 70%);
+}
+.flash-water {
+  background: radial-gradient(circle, rgba(80, 144, 255, 0.9), transparent 70%);
+}
+.flash-electric {
+  background: radial-gradient(circle, rgba(255, 220, 30, 0.9), transparent 70%);
+}
+.flash-grass {
+  background: radial-gradient(circle, rgba(100, 210, 60, 0.9), transparent 70%);
+}
+.flash-ice {
+  background: radial-gradient(circle, rgba(150, 220, 230, 0.9), transparent 70%);
+}
+.flash-fighting {
+  background: radial-gradient(circle, rgba(200, 40, 30, 0.9), transparent 70%);
+}
+.flash-poison {
+  background: radial-gradient(circle, rgba(170, 50, 170, 0.9), transparent 70%);
+}
+.flash-ground {
+  background: radial-gradient(circle, rgba(230, 190, 90, 0.9), transparent 70%);
+}
+.flash-flying {
+  background: radial-gradient(circle, rgba(170, 140, 255, 0.9), transparent 70%);
+}
+.flash-psychic {
+  background: radial-gradient(circle, rgba(255, 80, 140, 0.9), transparent 70%);
+}
+.flash-bug {
+  background: radial-gradient(circle, rgba(170, 190, 20, 0.9), transparent 70%);
+}
+.flash-rock {
+  background: radial-gradient(circle, rgba(190, 170, 50, 0.9), transparent 70%);
+}
+.flash-ghost {
+  background: radial-gradient(circle, rgba(110, 80, 160, 0.9), transparent 70%);
+}
+.flash-dragon {
+  background: radial-gradient(circle, rgba(110, 50, 255, 0.9), transparent 70%);
+}
+.flash-dark {
+  background: radial-gradient(circle, rgba(110, 80, 60, 0.9), transparent 70%);
+}
+.flash-steel {
+  background: radial-gradient(circle, rgba(190, 190, 210, 0.9), transparent 70%);
+}
+.flash-fairy {
+  background: radial-gradient(circle, rgba(240, 150, 175, 0.9), transparent 70%);
+}
+
+/* ── HUDs ── */
+.hud {
+  position: absolute;
+  width: 240px;
+  background-color: #fff;
+  border: 4px solid #333;
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 4px 4px 0 #333;
+  z-index: 5;
+}
+
+.enemy-hud {
+  top: 30px;
+  left: 30px;
+}
+
+.player-hud {
+  bottom: 30px;
+  right: 30px;
+}
 
 /* ── Intro animations ── */
 .intro-enemy {
@@ -1063,20 +1217,44 @@ onMounted(() => {
 }
 
 @keyframes slideInEnemy {
-  0% { transform: translateX(300px); opacity: 0; }
-  70% { transform: translateX(-10px); opacity: 1; }
-  100% { transform: translateX(0); opacity: 1; }
+  0% {
+    transform: translateX(300px);
+    opacity: 0;
+  }
+  70% {
+    transform: translateX(-10px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 @keyframes slideInPlayer {
-  0% { transform: scaleX(-1) translateX(300px); opacity: 0; }
-  70% { transform: scaleX(-1) translateX(-10px); opacity: 1; }
-  100% { transform: scaleX(-1) translateX(0); opacity: 1; }
+  0% {
+    transform: scaleX(-1) translateX(300px);
+    opacity: 0;
+  }
+  70% {
+    transform: scaleX(-1) translateX(-10px);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(-1) translateX(0);
+    opacity: 1;
+  }
 }
 
 @keyframes fadeInHud {
-  0% { opacity: 0; transform: translateY(-10px); }
-  100% { opacity: 1; transform: translateY(0); }
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── Attack lunge ── */
@@ -1089,15 +1267,27 @@ onMounted(() => {
 }
 
 @keyframes lungeRight {
-  0% { transform: scaleX(-1) translateX(0); }
-  40% { transform: scaleX(-1) translateX(-40px); }
-  100% { transform: scaleX(-1) translateX(0); }
+  0% {
+    transform: scaleX(-1) translateX(0);
+  }
+  40% {
+    transform: scaleX(-1) translateX(-40px);
+  }
+  100% {
+    transform: scaleX(-1) translateX(0);
+  }
 }
 
 @keyframes lungeLeft {
-  0% { transform: translateX(0); }
-  40% { transform: translateX(40px); }
-  100% { transform: translateX(0); }
+  0% {
+    transform: translateX(0);
+  }
+  40% {
+    transform: translateX(40px);
+  }
+  100% {
+    transform: translateX(0);
+  }
 }
 
 /* ── Shake on hit ── */
@@ -1106,14 +1296,36 @@ onMounted(() => {
 }
 
 @keyframes shake {
-  0%, 100% { filter: brightness(1); }
-  10% { transform: translateX(-6px); filter: brightness(2); }
-  20% { transform: translateX(6px); filter: brightness(1); }
-  30% { transform: translateX(-4px); filter: brightness(2); }
-  40% { transform: translateX(4px); filter: brightness(1); }
-  50% { transform: translateX(-2px); filter: brightness(1.5); }
-  60% { transform: translateX(2px); }
-  70% { transform: translateX(0); }
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  10% {
+    transform: translateX(-6px);
+    filter: brightness(2);
+  }
+  20% {
+    transform: translateX(6px);
+    filter: brightness(1);
+  }
+  30% {
+    transform: translateX(-4px);
+    filter: brightness(2);
+  }
+  40% {
+    transform: translateX(4px);
+    filter: brightness(1);
+  }
+  50% {
+    transform: translateX(-2px);
+    filter: brightness(1.5);
+  }
+  60% {
+    transform: translateX(2px);
+  }
+  70% {
+    transform: translateX(0);
+  }
 }
 
 /* Override shake for player (needs scaleX) */
@@ -1122,14 +1334,37 @@ onMounted(() => {
 }
 
 @keyframes shakePlayer {
-  0%, 100% { transform: scaleX(-1); filter: brightness(1); }
-  10% { transform: scaleX(-1) translateX(-6px); filter: brightness(2); }
-  20% { transform: scaleX(-1) translateX(6px); filter: brightness(1); }
-  30% { transform: scaleX(-1) translateX(-4px); filter: brightness(2); }
-  40% { transform: scaleX(-1) translateX(4px); filter: brightness(1); }
-  50% { transform: scaleX(-1) translateX(-2px); filter: brightness(1.5); }
-  60% { transform: scaleX(-1) translateX(2px); }
-  70% { transform: scaleX(-1) translateX(0); }
+  0%,
+  100% {
+    transform: scaleX(-1);
+    filter: brightness(1);
+  }
+  10% {
+    transform: scaleX(-1) translateX(-6px);
+    filter: brightness(2);
+  }
+  20% {
+    transform: scaleX(-1) translateX(6px);
+    filter: brightness(1);
+  }
+  30% {
+    transform: scaleX(-1) translateX(-4px);
+    filter: brightness(2);
+  }
+  40% {
+    transform: scaleX(-1) translateX(4px);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scaleX(-1) translateX(-2px);
+    filter: brightness(1.5);
+  }
+  60% {
+    transform: scaleX(-1) translateX(2px);
+  }
+  70% {
+    transform: scaleX(-1) translateX(0);
+  }
 }
 
 /* ── Faint animation ── */
@@ -1142,13 +1377,25 @@ onMounted(() => {
 }
 
 @keyframes faint {
-  0% { transform: translateY(0); opacity: 1; }
-  100% { transform: translateY(60px); opacity: 0; }
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(60px);
+    opacity: 0;
+  }
 }
 
 @keyframes faintPlayer {
-  0% { transform: scaleX(-1) translateY(0); opacity: 1; }
-  100% { transform: scaleX(-1) translateY(60px); opacity: 0; }
+  0% {
+    transform: scaleX(-1) translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(-1) translateY(60px);
+    opacity: 0;
+  }
 }
 
 /* ── HUD ── */
@@ -1195,29 +1442,75 @@ onMounted(() => {
   background: #ddd;
 }
 
-.type-normal { background: #a8a878; }
-.type-fire { background: #f08030; }
-.type-water { background: #6890f0; color: #fff; }
-.type-electric { background: #f8d030; }
-.type-grass { background: #78c850; }
-.type-ice { background: #98d8d8; }
-.type-fighting { background: #c03028; color: #fff; }
-.type-poison { background: #a040a0; color: #fff; }
-.type-ground { background: #e0c068; }
-.type-flying { background: #a890f0; }
-.type-psychic { background: #f85888; color: #fff; }
-.type-bug { background: #a8b820; }
-.type-rock { background: #b8a038; }
-.type-ghost { background: #705898; color: #fff; }
-.type-dragon { background: #7038f8; color: #fff; }
-.type-dark { background: #705848; color: #fff; }
-.type-steel { background: #b8b8d0; }
-.type-fairy { background: #ee99ac; }
-.type-unknown { background: #999; color: #fff; }
+.type-normal {
+  background: #a8a878;
+}
+.type-fire {
+  background: #f08030;
+}
+.type-water {
+  background: #6890f0;
+  color: #fff;
+}
+.type-electric {
+  background: #f8d030;
+}
+.type-grass {
+  background: #78c850;
+}
+.type-ice {
+  background: #98d8d8;
+}
+.type-fighting {
+  background: #c03028;
+  color: #fff;
+}
+.type-poison {
+  background: #a040a0;
+  color: #fff;
+}
+.type-ground {
+  background: #e0c068;
+}
+.type-flying {
+  background: #a890f0;
+}
+.type-psychic {
+  background: #f85888;
+  color: #fff;
+}
+.type-bug {
+  background: #a8b820;
+}
+.type-rock {
+  background: #b8a038;
+}
+.type-ghost {
+  background: #705898;
+  color: #fff;
+}
+.type-dragon {
+  background: #7038f8;
+  color: #fff;
+}
+.type-dark {
+  background: #705848;
+  color: #fff;
+}
+.type-steel {
+  background: #b8b8d0;
+}
+.type-fairy {
+  background: #ee99ac;
+}
+.type-unknown {
+  background: #999;
+  color: #fff;
+}
 
 .enemy-hud {
-  top: 20px;
-  left: 20px;
+  top: 40px;
+  left: 40px;
 }
 
 .player-hud {
@@ -1238,7 +1531,9 @@ onMounted(() => {
 .hp-fill {
   height: 100%;
   background: #4caf50;
-  transition: width 0.6s ease-out, background-color 0.6s ease-out;
+  transition:
+    width 0.6s ease-out,
+    background-color 0.6s ease-out;
 }
 
 /* ── Battle menu ── */
@@ -1397,6 +1692,123 @@ onMounted(() => {
   }
   50% {
     opacity: 0;
+  }
+}
+
+/* ── Mobile Layout Adjustments ── */
+@media (max-width: 600px) {
+  .battle-scene {
+    font-size: 12px;
+    /* Center the horizon in the visible area above the 11rem menu */
+    /* Visible height = 100vh - 11rem */
+    /* Horizon = (100vh - 11rem) / 2 */
+    --battle-split: calc((100vh - 11rem) / 2);
+  }
+
+  /* HUDs */
+  .hud {
+    width: 160px;
+    padding: 6px;
+    background: rgba(255, 255, 255, 0.9);
+  }
+
+  .enemy-hud {
+    top: 10px;
+    left: 10px;
+  }
+
+  .player-hud {
+    /* 11rem (menu height) + 10px spacing */
+    bottom: calc(11rem + 10px);
+    right: 10px;
+  }
+
+  .hp-text {
+    font-size: 10px;
+  }
+
+  /* Sprites */
+  .enemy-sprite {
+    top: 130px; /* Moved down to clear HUD */
+    right: 110px; /* Increased gap */
+  }
+
+  .enemy-sprite.is-wild {
+    right: 20px; /* Centered-ish for wild pokemon (no trainer) */
+  }
+
+  .trainer-sprite {
+    top: 20px;
+    right: -10px; /* Moved slightly off-screen to give space */
+    width: 140px; /* Restored size */
+  }
+
+  .enemy-sprite img,
+  .trainer-sprite {
+    width: 144px; /* Restored size */
+  }
+
+  .player-sprite {
+    bottom: 19rem; /* Moved up to clear HUD/Menu */
+    left: 110px; /* Mirrored: 110px matching enemy's right: 110px */
+    z-index: 5;
+  }
+
+  .player-trainer-sprite {
+    left: -10px; /* Mirrored: -10px matching trainer's right: -10px */
+    width: 140px; /* Restored size */
+    bottom: 19rem;
+    z-index: 4;
+  }
+
+  .player-sprite img,
+  .player-trainer-sprite {
+    width: 144px; /* Restored size */
+  }
+
+  .intro-enemy {
+    transform: translateX(100px);
+  }
+
+  .intro-player {
+    transform: scaleX(-1) translateX(100px);
+  }
+
+  /* Menu */
+  .battle-menu {
+    border-top: 2px solid #000;
+    padding: 10px;
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    box-sizing: border-box;
+    height: 11rem; /* Fixed height for mobile menu */
+    z-index: 100;
+  }
+
+  .battle-text {
+    font-size: 14px;
+  }
+
+  .move-button,
+  .utility button,
+  .bag-item,
+  .party-item {
+    padding: 8px;
+    font-size: 10px;
+  }
+
+  .move-name,
+  .bag-name,
+  .party-name {
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  .move-meta,
+  .bag-meta,
+  .party-meta {
+    font-size: 8px;
   }
 }
 </style>
