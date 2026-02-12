@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useGameStore } from './stores/gameStore'
 import WorldMap from './components/WorldMap.vue'
 import PlayerCharacter from './components/PlayerCharacter.vue'
@@ -13,10 +13,41 @@ import TrainerSelect from './components/TrainerSelect.vue'
 import BattleTransition from './components/BattleTransition.vue'
 import MiniMap from './components/MiniMap.vue'
 import VirtualControls from './components/VirtualControls.vue'
+import { gameAudio, type AudioScene } from './audio/gameAudio'
 
 const store = useGameStore()
+const audioPreferenceKey = 'pokemon-vue-audio-enabled'
+const audioEnabled = ref(true)
+
+const mapStateToAudioScene = (state: typeof store.gameState): AudioScene => {
+  if (state === 'BATTLE' || state === 'TRANSITION') return 'battle'
+  if (state === 'MENU' || state === 'SHOP' || state === 'STARTER' || state === 'TRAINER_SELECT') {
+    return 'menu'
+  }
+  if (state === 'ROAMING' || state === 'DIALOG') return 'overworld'
+  return 'none'
+}
+
+const toggleAudio = () => {
+  const next = !audioEnabled.value
+  audioEnabled.value = next
+  gameAudio.setEnabled(next)
+  if (next) {
+    gameAudio.unlock()
+    gameAudio.playSfx('confirm')
+  }
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(audioPreferenceKey, next ? '1' : '0')
+  }
+}
+
+const unlockAudio = () => {
+  gameAudio.unlock()
+}
 
 const handleKeydown = (e: KeyboardEvent) => {
+  gameAudio.unlock()
+
   if (
     store.isLoading ||
     store.gameState === 'STARTER' ||
@@ -81,13 +112,39 @@ const handleKeydown = (e: KeyboardEvent) => {
   }
 }
 
+watch(
+  () => store.gameState,
+  (next, prev) => {
+    gameAudio.setScene(mapStateToAudioScene(next))
+    if (next === 'TRANSITION' && prev !== 'TRANSITION') gameAudio.playSfx('encounter')
+    if ((next === 'MENU' || next === 'SHOP') && prev !== 'MENU' && prev !== 'SHOP') {
+      gameAudio.playSfx('menu-open')
+    }
+    if ((prev === 'MENU' || prev === 'SHOP') && next === 'ROAMING') {
+      gameAudio.playSfx('menu-close')
+    }
+    if (next === 'DIALOG' && prev === 'ROAMING') {
+      gameAudio.playSfx('confirm')
+    }
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
+  if (typeof window !== 'undefined') {
+    const rawPreference = window.localStorage.getItem(audioPreferenceKey)
+    audioEnabled.value = rawPreference !== '0'
+  }
+  gameAudio.setEnabled(audioEnabled.value)
+  gameAudio.setScene(mapStateToAudioScene(store.gameState))
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('pointerdown', unlockAudio)
   store.bootstrap()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('pointerdown', unlockAudio)
 })
 </script>
 
@@ -103,6 +160,9 @@ onUnmounted(() => {
       </p>
       <p v-else-if="store.gameState === 'DIALOG'">Talking...</p>
       <p v-else-if="store.gameState === 'MENU'">Menu</p>
+      <button class="audio-toggle" type="button" @click="toggleAudio">
+        {{ audioEnabled ? 'SOUND ON' : 'SOUND OFF' }}
+      </button>
     </div>
 
     <!-- Minimap Overlay -->
@@ -178,6 +238,19 @@ body {
   font-size: 0.62rem;
 }
 
+.audio-toggle {
+  margin-top: 8px;
+  pointer-events: auto;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
 .minimap-overlay {
   position: absolute;
   top: 20px;
@@ -219,6 +292,12 @@ body {
   .ui-overlay p {
     font-size: 0.56rem;
     line-height: 1.35;
+  }
+
+  .audio-toggle {
+    margin-top: 6px;
+    padding: 5px 7px;
+    font-size: 9px;
   }
 
   .minimap-overlay {

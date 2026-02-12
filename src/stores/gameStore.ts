@@ -19,6 +19,7 @@ import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
 import { SHOPS } from '../data/shops'
 import { getMoveData } from '../data/battle/moves'
 import { defaultAbilityForTypes } from '../data/battle/abilities'
+import { gameAudio } from '../audio/gameAudio'
 import {
   TRAINER_SPRITES,
   trainerSprite,
@@ -859,6 +860,7 @@ export const useGameStore = defineStore('game', () => {
   const triggerWhiteoutRecovery = () => {
     healPartyFully()
     sendPlayerToPokemonCenter()
+    gameAudio.playSfx('heal')
     dialog.value = {
       speaker: 'Nurse Joy',
       lines: ['You blacked out!', 'You were rushed to the Pokemon Center.', 'Your party was fully healed.'],
@@ -1252,6 +1254,7 @@ export const useGameStore = defineStore('game', () => {
 
     if (npc.role === 'center') {
       healPartyFully()
+      gameAudio.playSfx('heal')
       dialog.value = {
         speaker: npc.name,
         lines: [...npc.dialog, 'Your party is fully healed!'],

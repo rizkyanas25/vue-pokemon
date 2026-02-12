@@ -16,6 +16,7 @@ import {
 import type { MoveState, PokemonInstance } from '../engine/pokemon'
 import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
 import { getAbilityName } from '../data/battle/abilities'
+import { gameAudio } from '../audio/gameAudio'
 
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
@@ -115,6 +116,7 @@ const clampIndex = (value: number, max: number) => {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const triggerAttack = async (side: 'player' | 'enemy') => {
+  gameAudio.playSfx('attack')
   if (side === 'player') {
     playerAttacking.value = true
     await wait(300)
@@ -139,6 +141,7 @@ const triggerShake = async (side: 'player' | 'enemy') => {
 }
 
 const triggerFlash = async (side: 'player' | 'enemy', moveType: string) => {
+  gameAudio.playSfx('hit')
   flashSide.value = side
   flashType.value = moveType
   await wait(350)
@@ -147,6 +150,7 @@ const triggerFlash = async (side: 'player' | 'enemy', moveType: string) => {
 }
 
 const triggerFaint = async (side: 'player' | 'enemy') => {
+  gameAudio.playSfx('faint')
   if (side === 'player') {
     playerFainting.value = true
   } else {
