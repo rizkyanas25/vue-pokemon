@@ -2,12 +2,22 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { TILE, WALKABLE_TILES, type TileId, type NpcData } from '../constants/game'
 import { overworldMap, overworldNpcs, overworldSpawn } from '../data/overworld'
-import { createPokemonInstance, expForLevel, type PokemonInstance } from '../engine/pokemon'
+import {
+  applyExperience,
+  calculateStats,
+  createPokemonInstance,
+  expForLevel,
+  getLevelUpMoveIds,
+  getPendingEvolution,
+  learnMove,
+  type PokemonInstance,
+} from '../engine/pokemon'
 import { STARTERS, type PokemonSpecies, type SpeciesKey } from '../data/battle/pokemon'
 import { fetchPokemonSpecies, normalizeSpeciesKey } from '../data/pokeapi'
 import type { TypeId } from '../data/battle/types'
 import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
 import { SHOPS } from '../data/shops'
+import { getMoveData } from '../data/battle/moves'
 import {
   TRAINER_SPRITES,
   trainerSprite,
@@ -172,6 +182,10 @@ export const useGameStore = defineStore('game', () => {
     try {
       const species = await fetchPokemonSpecies(keyOrId)
       cacheSpecies(species)
+      const nextEvolutionId = species.evolution?.toSpeciesId
+      if (nextEvolutionId && !findSpeciesInCache(nextEvolutionId)) {
+        void ensureSpecies(nextEvolutionId)
+      }
       return species
     } catch {
       if (starterFallback) {
@@ -181,6 +195,78 @@ export const useGameStore = defineStore('game', () => {
       const placeholder = buildPlaceholderSpecies(keyOrId)
       cacheSpecies(placeholder)
       return placeholder
+    }
+  }
+
+  const applyMoveLearning = (pokemon: PokemonInstance, fromLevel: number, toLevel: number) => {
+    const moveIds = getLevelUpMoveIds(pokemon.species, fromLevel, toLevel)
+    const messages: string[] = []
+
+    for (const moveId of moveIds) {
+      const moveName = getMoveData(moveId).name
+      const result = learnMove(pokemon, moveId)
+      if (result === 'learned') {
+        messages.push(`${pokemon.name} learned ${moveName}!`)
+      } else if (result === 'no-slot') {
+        messages.push(`${pokemon.name} wants to learn ${moveName}, but already knows 4 moves.`)
+      }
+    }
+
+    return messages
+  }
+
+  const evolvePokemon = async (pokemon: PokemonInstance) => {
+    const messages: string[] = []
+    let safety = 0
+
+    while (safety < 3) {
+      const evolution = getPendingEvolution(pokemon)
+      if (!evolution) break
+
+      const evolvedSpecies = await ensureSpecies(evolution.toSpeciesId)
+      if (evolvedSpecies.id === pokemon.species.id) break
+
+      const previousName = pokemon.name
+      const previousSpeciesName = pokemon.species.name
+      const previousStats = pokemon.stats
+      const missingHp = Math.max(0, previousStats.hp - pokemon.currentHp)
+
+      pokemon.species = evolvedSpecies
+      pokemon.name = evolvedSpecies.name
+      pokemon.stats = calculateStats(evolvedSpecies.baseStats, pokemon.level)
+      pokemon.currentHp = Math.max(
+        1,
+        Math.min(pokemon.stats.hp, Math.max(1, pokemon.stats.hp - missingHp)),
+      )
+
+      markSeen(evolvedSpecies)
+      markCaught(evolvedSpecies)
+
+      messages.push(`What? ${previousName} is evolving!`)
+      messages.push(
+        `Congratulations! Your ${previousSpeciesName} evolved into ${evolvedSpecies.name}!`,
+      )
+      messages.push(...applyMoveLearning(pokemon, pokemon.level - 1, pokemon.level))
+      safety += 1
+    }
+
+    return messages
+  }
+
+  const applyBattleProgression = async (pokemon: PokemonInstance, gainedExp: number) => {
+    const { levelsReached } = applyExperience(pokemon, gainedExp)
+    const messages: string[] = []
+
+    for (const level of levelsReached) {
+      messages.push(`${pokemon.name} grew to level ${level}!`)
+      messages.push(...applyMoveLearning(pokemon, level - 1, level))
+    }
+
+    messages.push(...(await evolvePokemon(pokemon)))
+
+    return {
+      levelsGained: levelsReached.length,
+      messages,
     }
   }
 
@@ -1160,6 +1246,7 @@ export const useGameStore = defineStore('game', () => {
     useItem,
     useCatchItem,
     catchPokemon,
+    applyBattleProgression,
     addMoney,
     openShop,
     closeShop,

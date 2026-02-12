@@ -22,6 +22,8 @@ export type PokemonInstance = {
   moves: MoveState[]
 }
 
+export type MoveLearnResult = 'learned' | 'already-known' | 'no-slot'
+
 const createStatStages = (): StatStages => ({
   atk: 0,
   def: 0,
@@ -124,18 +126,51 @@ export const createPokemonInstance = (
 
 export const applyExperience = (pokemon: PokemonInstance, gainedExp: number) => {
   let levelsGained = 0
+  const levelsReached: number[] = []
   pokemon.exp += gainedExp
 
   while (pokemon.level < 100 && pokemon.exp >= expForLevel(pokemon.level + 1)) {
     const oldStats = pokemon.stats
     pokemon.level += 1
+    levelsReached.push(pokemon.level)
     pokemon.stats = calculateStats(pokemon.species.baseStats, pokemon.level)
     const hpDelta = pokemon.stats.hp - oldStats.hp
     pokemon.currentHp = Math.min(pokemon.stats.hp, pokemon.currentHp + hpDelta)
     levelsGained += 1
   }
 
-  return { levelsGained }
+  return { levelsGained, levelsReached }
+}
+
+export const getLevelUpMoveIds = (species: PokemonSpecies, fromLevel: number, toLevel: number) => {
+  if (!species.levelUpMoves?.length) return []
+
+  const learned: MoveId[] = []
+  for (const move of species.levelUpMoves) {
+    if (move.level <= fromLevel || move.level > toLevel) continue
+    if (!learned.includes(move.moveId)) learned.push(move.moveId)
+  }
+  return learned
+}
+
+export const learnMove = (pokemon: PokemonInstance, moveId: MoveId): MoveLearnResult => {
+  if (pokemon.moves.some((move) => move.id === moveId)) return 'already-known'
+  if (pokemon.moves.length >= 4) return 'no-slot'
+
+  const move = getMoveData(moveId)
+  pokemon.moves.push({
+    id: move.id,
+    pp: move.pp,
+    maxPp: move.pp,
+  })
+  return 'learned'
+}
+
+export const getPendingEvolution = (pokemon: PokemonInstance) => {
+  const evolution = pokemon.species.evolution
+  if (!evolution) return null
+  if (pokemon.level < evolution.minLevel) return null
+  return evolution
 }
 
 export const resetBattleStages = (pokemon: PokemonInstance) => {

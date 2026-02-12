@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useGameStore } from '../stores/gameStore'
 import { getMoveData } from '../data/battle/moves'
-import { applyExperience, resetBattleStages } from '../engine/pokemon'
+import { resetBattleStages } from '../engine/pokemon'
 import {
   applyEndOfTurnStatus,
   attemptCatch,
@@ -240,7 +240,7 @@ const battleBackgroundStyle = computed(() => {
 })
 
 /* ── Turn resolution with animations ── */
-const resolveTurn = (playerMoveState: MoveState) => {
+const resolveTurn = async (playerMoveState: MoveState) => {
   const player = playerPokemon.value
   const enemy = enemyPokemon.value
   if (!player || !enemy) return
@@ -249,6 +249,8 @@ const resolveTurn = (playerMoveState: MoveState) => {
     queueMessages([`${player.name} has no PP left!`])
     return
   }
+
+  uiState.value = 'ANIMATING'
 
   playerMoveState.pp -= 1
   const playerMove = getMoveDataFromState(playerMoveState)
@@ -367,9 +369,15 @@ const resolveTurn = (playerMoveState: MoveState) => {
     const reward = Math.max(20, Math.floor(enemy.level * 15))
     store.addMoney(reward)
     entries.push({ text: `You got ₽${reward}!` })
-    const { levelsGained } = applyExperience(player, expGain)
-    if (levelsGained > 0) {
-      entries.push({ text: `${player.name} grew to level ${player.level}!` })
+    let progressionMessages: string[] = []
+    try {
+      const progression = await store.applyBattleProgression(player, expGain)
+      progressionMessages = progression.messages
+    } catch {
+      progressionMessages = []
+    }
+    for (const message of progressionMessages) {
+      entries.push({ text: message })
     }
     pendingEnd.value = 'WIN'
   } else if (player.currentHp <= 0) {
@@ -425,7 +433,7 @@ const resolveTurn = (playerMoveState: MoveState) => {
 
 const selectMove = (moveState: MoveState) => {
   if (uiState.value !== 'INPUT') return
-  resolveTurn(moveState)
+  void resolveTurn(moveState)
 }
 
 const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
