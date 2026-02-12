@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { TILE, WALKABLE_TILES, type TileId, type NpcData } from '../constants/game'
-import { overworldMap, overworldNpcs, overworldSpawn, pokemonCenterRespawn } from '../data/overworld'
+import {
+  getOverworldSectorTiles,
+  overworldMap,
+  overworldNpcs,
+  overworldSpawn,
+  pokemonCenterRespawn,
+} from '../data/overworld'
 import {
   applyExperience,
   calculateStats,
@@ -124,7 +130,7 @@ export const useGameStore = defineStore('game', () => {
   ])
 
   const saveKey = 'pokemon-vue-save-v3'
-  const MAP_VERSION = 3
+  const MAP_VERSION = 4
   const legacySaveKey = 'pokemon-vue-save-v2'
   const legacySaveKeyV1 = 'pokemon-vue-save-v1'
   const hasSaveData = ref(false)
@@ -574,10 +580,8 @@ export const useGameStore = defineStore('game', () => {
     const key = mapKey(x, y)
     if (mapCache.value[key]) return key
 
-    const width = overworldMap.width
-    const height = overworldMap.height
     const isCenter = x === 1 && y === 1
-    const tiles = isCenter ? overworldMap.tiles : generateMap(width, height)
+    const tiles = getOverworldSectorTiles(x, y)
     mapCache.value[key] = tiles
 
     const reachable = buildReachableSet(tiles)
