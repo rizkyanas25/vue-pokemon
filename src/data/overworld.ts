@@ -278,7 +278,7 @@ export const overworldNpcs: NpcData[] = [
     name: 'Pokemon Center',
     x: 13,
     y: 17,
-    sprite: trainerSprite('nurse'),
+    sprite: '/sprites/Pokemon_Center_FRLG.png',
     interiorId: 'pokemon_center',
     dialog: ['Need a rest? The Pokemon Center is open.'],
     role: 'portal',
