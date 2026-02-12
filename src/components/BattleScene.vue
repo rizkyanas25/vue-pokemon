@@ -35,8 +35,12 @@ interface QueueEntry {
 
 const store = useGameStore()
 
-const playerPokemon = computed<PokemonInstance | null>(
+const awaitingLeadSelection = ref(true)
+const activePartyPokemon = computed<PokemonInstance | null>(
   () => store.player.party[store.player.activeIndex] ?? null,
+)
+const playerPokemon = computed<PokemonInstance | null>(
+  () => (awaitingLeadSelection.value ? null : activePartyPokemon.value),
 )
 const enemyPokemon = computed(() => store.battle?.enemy ?? null)
 const trainerSprite = computed(() => store.battle?.trainerSprite ?? '')
@@ -61,6 +65,7 @@ const selectedBagIndex = ref(0)
 const selectedPartyIndex = ref(0)
 const messageQueue = ref<QueueEntry[]>([])
 const currentMessage = ref('')
+const firstAvailablePartyIndex = () => store.player.party.findIndex((member) => member.currentHp > 0)
 
 /* ── Animation state ── */
 const introReady = ref(false)
@@ -187,8 +192,13 @@ const showNextMessage = () => {
     finishBattle()
   } else {
     uiState.value = 'INPUT'
-    menuMode.value = 'MAIN'
-    mainSection.value = 'moves'
+    if (awaitingLeadSelection.value) {
+      menuMode.value = 'PARTY'
+      selectedPartyIndex.value = Math.max(0, firstAvailablePartyIndex())
+    } else {
+      menuMode.value = 'MAIN'
+      mainSection.value = 'moves'
+    }
   }
 }
 
@@ -267,6 +277,7 @@ const battleBackgroundStyle = computed(() => {
 
 /* ── Turn resolution with animations ── */
 const resolveTurn = async (playerMoveState: MoveState) => {
+  if (awaitingLeadSelection.value) return
   const player = playerPokemon.value
   const enemy = enemyPokemon.value
   if (!player || !enemy) return
@@ -588,7 +599,7 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
 }
 
 const openBag = () => {
-  if (uiState.value !== 'INPUT') return
+  if (uiState.value !== 'INPUT' || awaitingLeadSelection.value) return
   menuMode.value = 'BAG'
 }
 
@@ -598,6 +609,7 @@ const openParty = () => {
 }
 
 const backToMain = () => {
+  if (awaitingLeadSelection.value) return
   menuMode.value = 'MAIN'
   mainSection.value = 'moves'
 }
@@ -656,6 +668,23 @@ const switchPokemon = (index: number) => {
     queueMessages(['That Pokemon has no energy left!'])
     return
   }
+
+  if (awaitingLeadSelection.value) {
+    store.setActiveParty(index)
+    awaitingLeadSelection.value = false
+    displayPlayerHp.value = target.currentHp
+    menuMode.value = 'MAIN'
+    mainSection.value = 'moves'
+
+    const lines: string[] = [`Go, ${target.name}!`]
+    const enemy = enemyPokemon.value
+    if (enemy) {
+      lines.push(...applyBattleEntryAbilities(target, enemy))
+    }
+    queueMessages(lines)
+    return
+  }
+
   if (index === store.player.activeIndex) return
 
   store.setActiveParty(index)
@@ -666,7 +695,7 @@ const switchPokemon = (index: number) => {
 }
 
 const run = () => {
-  if (uiState.value !== 'INPUT') return
+  if (uiState.value !== 'INPUT' || awaitingLeadSelection.value) return
   if (isTrainerBattle.value) {
     queueMessages(["You can't run from a trainer battle!"])
     return
@@ -817,7 +846,7 @@ const handleBattleKeydown = (e: KeyboardEvent) => {
       switchPokemon(selectedPartyIndex.value)
       return
     }
-    if (isCancel) backToMain()
+    if (isCancel && !awaitingLeadSelection.value) backToMain()
   }
 }
 
@@ -844,14 +873,24 @@ onUnmounted(() => {
 
 onMounted(() => {
   const enemy = enemyPokemon.value
-  const player = playerPokemon.value
-  if (player) resetBattleStages(player)
+  const firstAvailable = firstAvailablePartyIndex()
+  if (firstAvailable >= 0) selectedPartyIndex.value = firstAvailable
+
+  for (const member of store.player.party) {
+    resetBattleStages(member)
+  }
   if (enemy) resetBattleStages(enemy)
 
   // Trigger intro animation after a brief delay
   setTimeout(() => {
     introReady.value = true
   }, 50)
+
+  if (firstAvailable < 0) {
+    pendingEnd.value = 'LOSE'
+    queueMessages(['You have no Pokemon that can battle!'])
+    return
+  }
 
   if (enemy) {
     const lines: string[] = []
@@ -863,16 +902,14 @@ onMounted(() => {
     } else {
       lines.push(`A wild ${enemy.name} appeared!`)
     }
-    if (player) {
-      lines.push(...applyBattleEntryAbilities(player, enemy))
-    }
+    lines.push('Choose your Pokemon.')
     queueMessages(lines)
   }
 })
 </script>
 
 <template>
-  <div class="battle-scene" :style="battleBackgroundStyle" v-if="enemyPokemon && playerPokemon">
+  <div class="battle-scene" :style="battleBackgroundStyle" v-if="enemyPokemon">
     <div class="battle-arena">
       <!-- Enemy HUD -->
       <div class="hud enemy-hud" :class="{ 'intro-hud-enemy': !introReady }">
@@ -920,6 +957,7 @@ onMounted(() => {
 
       <!-- Player sprite -->
       <div
+        v-if="playerPokemon"
         class="sprite-container player-sprite"
         :class="{
           'intro-player': !introReady,
@@ -946,7 +984,7 @@ onMounted(() => {
       />
 
       <!-- Player HUD -->
-      <div class="hud player-hud" :class="{ 'intro-hud-player': !introReady }">
+      <div v-if="playerPokemon" class="hud player-hud" :class="{ 'intro-hud-player': !introReady }">
         <div class="name">
           {{ playerPokemon.name }} Lv{{ playerPokemon.level }}
           <span v-if="playerStatus" class="status">{{ playerStatus }}</span>
@@ -980,7 +1018,7 @@ onMounted(() => {
         <template v-if="menuMode === 'MAIN'">
           <div class="moves">
             <button
-              v-for="(moveState, moveIndex) in playerPokemon.moves"
+              v-for="(moveState, moveIndex) in movesList"
               :key="moveState.id"
               class="move-button"
               :class="{
@@ -1062,8 +1100,9 @@ onMounted(() => {
               <div class="party-meta">HP {{ member.currentHp }} / {{ member.stats.hp }}</div>
             </button>
           </div>
+          <div v-if="awaitingLeadSelection" class="party-prompt">Choose your lead Pokemon.</div>
           <div class="utility">
-            <button @click="backToMain">BACK</button>
+            <button v-if="!awaitingLeadSelection" @click="backToMain">BACK</button>
           </div>
         </template>
       </div>
@@ -1670,6 +1709,11 @@ onMounted(() => {
 
 .menu-empty {
   grid-column: 1 / -1;
+  font-size: 12px;
+  color: #ddd;
+}
+
+.party-prompt {
   font-size: 12px;
   color: #ddd;
 }
