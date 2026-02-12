@@ -33,6 +33,6 @@ export type NpcData = {
   pokemonId?: number
   pokemonKey?: string
   shopId?: string
-  role?: 'trainer' | 'shop'
+  role?: 'trainer' | 'shop' | 'center'
   defeated?: boolean
 }

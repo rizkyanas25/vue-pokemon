@@ -64,6 +64,7 @@ export const overworldMap = {
 }
 
 export const overworldSpawn = { x: 11, y: 18 }
+export const pokemonCenterRespawn = { mapX: 1, mapY: 1, x: 13, y: 18 }
 
 export const overworldNpcs: NpcData[] = [
   {
@@ -95,5 +96,14 @@ export const overworldNpcs: NpcData[] = [
     shopId: 'general',
     dialog: ['Welcome! Take a look at our goods.'],
     role: 'shop',
+  },
+  {
+    id: 'pokemon-center-nurse',
+    name: 'Nurse Joy',
+    x: 13,
+    y: 17,
+    sprite: trainerSprite('nurse'),
+    dialog: ['Welcome to the Pokemon Center!', "We'll heal your Pokemon back to full health."],
+    role: 'center',
   },
 ]

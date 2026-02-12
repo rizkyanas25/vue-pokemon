@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { TILE, WALKABLE_TILES, type TileId, type NpcData } from '../constants/game'
-import { overworldMap, overworldNpcs, overworldSpawn } from '../data/overworld'
+import { overworldMap, overworldNpcs, overworldSpawn, pokemonCenterRespawn } from '../data/overworld'
 import {
   applyExperience,
   calculateStats,
@@ -822,15 +822,61 @@ export const useGameStore = defineStore('game', () => {
     if (npc) npc.defeated = true
   }
 
+  const healPokemonFully = (pokemon: PokemonInstance) => {
+    pokemon.currentHp = pokemon.stats.hp
+    pokemon.status = 'none'
+    pokemon.statusTurns = 0
+    pokemon.moves = pokemon.moves.map((move) => {
+      const moveData = getMoveData(move.id)
+      const maxPp = move.maxPp ?? moveData.pp
+      return {
+        ...move,
+        maxPp,
+        pp: maxPp,
+      }
+    })
+  }
+
+  const healPartyFully = () => {
+    for (const member of player.value.party) {
+      healPokemonFully(member)
+    }
+  }
+
+  const sendPlayerToPokemonCenter = () => {
+    worldPos.value = { x: pokemonCenterRespawn.mapX, y: pokemonCenterRespawn.mapY }
+    setCurrentMap(worldPos.value.x, worldPos.value.y)
+    player.value.x = pokemonCenterRespawn.x
+    player.value.y = pokemonCenterRespawn.y
+    player.value.direction = 'down'
+    player.value.step = 0
+    ensurePlayerOnWalkable()
+  }
+
+  const triggerWhiteoutRecovery = () => {
+    healPartyFully()
+    sendPlayerToPokemonCenter()
+    dialog.value = {
+      speaker: 'Nurse Joy',
+      lines: ['You blacked out!', 'You were rushed to the Pokemon Center.', 'Your party was fully healed.'],
+      index: 0,
+    }
+    gameState.value = 'DIALOG'
+  }
+
   function endBattle(result?: BattleOutcome) {
     if (battle.value?.trainerId && (result === 'WIN' || result === 'CATCH')) {
       markTrainerDefeated(battle.value.trainerId)
     }
     battle.value = null
-    gameState.value = 'ROAMING'
     encounterLock.value = false
     battleTransition.value = null
     pendingBattle.value = null
+    if (result === 'LOSE') {
+      triggerWhiteoutRecovery()
+      return
+    }
+    gameState.value = 'ROAMING'
   }
 
   function openMenu(tab?: MenuTab) {
@@ -965,7 +1011,17 @@ export const useGameStore = defineStore('game', () => {
     const level = pokemon.level ?? 1
     const template = createPokemonInstance(species, level)
     const stats = pokemon.stats ?? template.stats
-    const moves = pokemon.moves?.length ? pokemon.moves : template.moves
+    const rawMoves = pokemon.moves?.length ? pokemon.moves : template.moves
+    const moves = rawMoves.map((move) => {
+      const moveData = getMoveData(move.id)
+      const maxPp = move.maxPp ?? moveData.pp
+      const pp = typeof move.pp === 'number' ? Math.max(0, Math.min(move.pp, maxPp)) : maxPp
+      return {
+        ...move,
+        maxPp,
+        pp,
+      }
+    })
     const currentHp = Math.min(pokemon.currentHp ?? stats.hp, stats.hp)
 
     return {
@@ -1186,6 +1242,17 @@ export const useGameStore = defineStore('game', () => {
     const target = getFrontTile()
     const npc = getNpcAt(target.x, target.y)
     if (!npc) return
+
+    if (npc.role === 'center') {
+      healPartyFully()
+      dialog.value = {
+        speaker: npc.name,
+        lines: [...npc.dialog, 'Your party is fully healed!'],
+        index: 0,
+      }
+      gameState.value = 'DIALOG'
+      return
+    }
 
     if (npc.shopId) {
       openShop(npc.shopId)
