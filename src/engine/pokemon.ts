@@ -44,24 +44,24 @@ export const calculateStats = (base: Stats, level: number): Stats => ({
 })
 
 const TYPE_MOVES: Partial<Record<TypeId, MoveId[]>> = {
-  electric: ['thunder_shock', 'quick_attack', 'tail_whip', 'growl'],
-  grass: ['vine_whip', 'tackle', 'growl', 'sleep_powder'],
-  poison: ['poison_sting', 'tackle', 'tail_whip', 'growl'],
-  fire: ['ember', 'scratch', 'growl', 'quick_attack'],
-  water: ['water_gun', 'tackle', 'tail_whip', 'quick_attack'],
-  normal: ['tackle', 'quick_attack', 'growl', 'tail_whip'],
-  bug: ['tackle', 'growl'],
-  flying: ['quick_attack', 'tackle'],
-  ground: ['tackle', 'tail_whip'],
-  rock: ['tackle'],
-  psychic: ['tackle', 'growl'],
-  ice: ['tackle'],
-  fighting: ['tackle'],
-  ghost: ['tackle'],
-  dragon: ['tackle'],
-  dark: ['tackle'],
-  steel: ['tackle'],
-  fairy: ['tackle'],
+  electric: ['thunder_shock', 'spark', 'thunderbolt', 'thunder', 'quick_attack', 'growl'],
+  grass: ['vine_whip', 'razor_leaf', 'leaf_blade', 'solar_beam', 'sleep_powder', 'growl'],
+  poison: ['poison_sting', 'sludge', 'sludge_bomb', 'tail_whip', 'leer'],
+  fire: ['ember', 'flame_wheel', 'flamethrower', 'fire_blast', 'scratch', 'growl'],
+  water: ['water_gun', 'bubble_beam', 'surf', 'hydro_pump', 'tail_whip', 'tackle'],
+  normal: ['tackle', 'pound', 'quick_attack', 'body_slam', 'slam', 'hyper_fang', 'growl'],
+  bug: ['bug_bite', 'x_scissor', 'tackle', 'growl'],
+  flying: ['wing_attack', 'aerial_ace', 'quick_attack', 'growl'],
+  ground: ['mud_shot', 'earthquake', 'tackle', 'tail_whip'],
+  rock: ['rock_throw', 'rock_slide', 'tackle', 'harden'],
+  psychic: ['confusion', 'psybeam', 'psychic', 'agility', 'growl'],
+  ice: ['ice_beam', 'blizzard', 'tackle', 'harden'],
+  fighting: ['karate_chop', 'brick_break', 'tackle', 'leer'],
+  ghost: ['shadow_ball', 'tackle', 'growl'],
+  dragon: ['dragon_breath', 'dragon_claw', 'scratch', 'growl'],
+  dark: ['bite', 'crunch', 'quick_attack', 'leer'],
+  steel: ['metal_claw', 'tackle', 'harden'],
+  fairy: ['disarming_voice', 'moonblast', 'tail_whip', 'growl'],
 }
 
 const buildMoveStates = (moveIds: MoveId[]) =>
@@ -74,7 +74,21 @@ const buildMoveStates = (moveIds: MoveId[]) =>
     }
   })
 
-const getSuggestedMoves = (types: TypeId[], overrides?: MoveId[]) => {
+const getMovesForLevel = (species: PokemonSpecies, level: number) => {
+  if (!species.levelUpMoves?.length) return []
+
+  const sorted = [...species.levelUpMoves].sort((a, b) => a.level - b.level)
+  const selected: MoveId[] = []
+
+  for (const move of sorted) {
+    if (move.level > level) continue
+    selected.push(move.moveId)
+  }
+
+  return selected.slice(-4)
+}
+
+const getSuggestedMoves = (species: PokemonSpecies, level: number, overrides?: MoveId[]) => {
   const selected: MoveId[] = []
 
   if (overrides?.length) {
@@ -83,7 +97,14 @@ const getSuggestedMoves = (types: TypeId[], overrides?: MoveId[]) => {
     }
   }
 
-  for (const type of types) {
+  if (!overrides?.length) {
+    const levelMoves = getMovesForLevel(species, level)
+    for (const moveId of levelMoves) {
+      if (!selected.includes(moveId)) selected.push(moveId)
+    }
+  }
+
+  for (const type of species.types) {
     const candidates = TYPE_MOVES[type] ?? []
     for (const moveId of candidates) {
       if (!selected.includes(moveId)) selected.push(moveId)
@@ -106,7 +127,7 @@ export const createPokemonInstance = (
   moveOverrides?: MoveId[],
 ): PokemonInstance => {
   const stats = calculateStats(species.baseStats, level)
-  const moveIds = getSuggestedMoves(species.types, moveOverrides)
+  const moveIds = getSuggestedMoves(species, level, moveOverrides)
   const moves = buildMoveStates(moveIds)
 
   return {

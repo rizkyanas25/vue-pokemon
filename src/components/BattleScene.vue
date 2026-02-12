@@ -254,7 +254,7 @@ const resolveTurn = async (playerMoveState: MoveState) => {
 
   playerMoveState.pp -= 1
   const playerMove = getMoveDataFromState(playerMoveState)
-  const enemyMoveState = chooseMove(enemy)
+  const enemyMoveState = chooseMove(enemy, player)
   const enemyMove = enemyMoveState ? getMoveDataFromState(enemyMoveState) : null
 
   const actions = [
@@ -443,7 +443,7 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
 
   const entries: QueueEntry[] = [...preEntries]
 
-  const enemyMoveState = chooseMove(enemy)
+  const enemyMoveState = chooseMove(enemy, player)
   if (enemyMoveState) {
     const enemyMove = getMoveDataFromState(enemyMoveState)
     const hpBefore = player.currentHp

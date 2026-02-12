@@ -265,10 +265,112 @@ export const attemptCatch = (
   return { caught, shakes, messages }
 }
 
-export const chooseMove = (pokemon: PokemonInstance) => {
-  const usableMoves = pokemon.moves.filter((move) => move.pp > 0)
+const STAGE_MAX = 6
+const STAGE_MIN = -6
+
+const estimateDamageScore = (
+  attacker: PokemonInstance,
+  defender: PokemonInstance,
+  moveData: MoveData,
+) => {
+  const power = moveData.power ?? 0
+  if (power <= 0) return 0
+
+  const attackStat =
+    moveData.category === 'physical' ? getEffectiveStat(attacker, 'atk') : getEffectiveStat(attacker, 'spa')
+  const defenseStat =
+    moveData.category === 'physical' ? getEffectiveStat(defender, 'def') : getEffectiveStat(defender, 'spd')
+
+  const stab = attacker.species.types.includes(moveData.type) ? 1.5 : 1
+  const typeMultiplier = getTypeMultiplier(moveData.type, defender.species.types)
+  if (typeMultiplier === 0) return -100
+
+  const expectedBase = ((2 * attacker.level) / 5 + 2) * power * (attackStat / Math.max(1, defenseStat))
+  const expectedDamage = Math.max(1, Math.floor((expectedBase / 50 + 2) * stab * typeMultiplier))
+  const accuracyFactor = moveData.accuracy / 100
+
+  let score = expectedDamage * accuracyFactor
+  if (attacker.species.types.includes(moveData.type)) score += 10
+  if (typeMultiplier > 1) score += 25
+  if (typeMultiplier < 1) score -= 12
+  if (defender.currentHp <= expectedDamage) score += 120
+
+  return score
+}
+
+const evaluateStatusMove = (
+  attacker: PokemonInstance,
+  defender: PokemonInstance,
+  moveData: MoveData,
+) => {
+  let score = 12
+  const effect = moveData.effect
+  if (!effect) return score
+
+  if (effect.status) {
+    const target = effect.target === 'self' ? attacker : defender
+    const chance = effect.statusChance ?? 0.5
+    if (target.status === 'none') score += 40 * chance
+    else score -= 25
+  }
+
+  if (effect.statChanges) {
+    for (const [key, amount] of Object.entries(effect.statChanges)) {
+      const stat = key as StatKey
+      const target = effect.target === 'self' ? attacker : defender
+      const currentStage = target.statStages[stat]
+      const delta = amount ?? 0
+
+      if (delta > 0) {
+        if (currentStage >= STAGE_MAX) {
+          score -= 10
+        } else {
+          score += 14 * delta
+        }
+      }
+
+      if (delta < 0) {
+        if (currentStage <= STAGE_MIN) {
+          score -= 10
+        } else {
+          score += 14 * Math.abs(delta)
+        }
+      }
+    }
+  }
+
+  return score * (moveData.accuracy / 100)
+}
+
+const scoreMove = (attacker: PokemonInstance, defender: PokemonInstance, moveData: MoveData) => {
+  if (moveData.category === 'status') {
+    return evaluateStatusMove(attacker, defender, moveData)
+  }
+
+  let score = estimateDamageScore(attacker, defender, moveData)
+  const effect = moveData.effect
+  if (effect?.status && defender.status === 'none') {
+    score += 10 * (effect.statusChance ?? 0.5)
+  }
+  return score
+}
+
+export const chooseMove = (attacker: PokemonInstance, defender: PokemonInstance) => {
+  const usableMoves = attacker.moves.filter((move) => move.pp > 0)
   if (usableMoves.length === 0) return null
-  return usableMoves[Math.floor(Math.random() * usableMoves.length)]
+
+  const ranked = usableMoves
+    .map((moveState) => {
+      const move = getMoveData(moveState.id)
+      const score = scoreMove(attacker, defender, move) + Math.random() * 4
+      return { moveState, score }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  const bestScore = ranked[0]?.score ?? 0
+  const shortlist = ranked.filter((entry) => entry.score >= bestScore - 8)
+  const selected = shortlist[Math.floor(Math.random() * shortlist.length)] ?? ranked[0]
+  return selected?.moveState ?? null
 }
 
 export const getMoveDataFromState = (moveState: { id: MoveId }) => getMoveData(moveState.id)
