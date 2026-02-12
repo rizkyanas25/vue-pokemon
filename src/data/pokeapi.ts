@@ -1,6 +1,7 @@
 import { MOVES, type MoveId } from './battle/moves'
 import type { EvolutionData, LevelUpMove, PokemonSpecies } from './battle/pokemon'
 import type { Stats, TypeId } from './battle/types'
+import { defaultAbilityForTypes, resolveAbilityFromPokeApi } from './battle/abilities'
 
 const API_BASE = 'https://pokeapi.co/api/v2'
 const BLACK_WHITE_VERSION = 'black-white'
@@ -48,6 +49,12 @@ type PokemonMoveEntry = {
   }>
 }
 
+type PokemonAbilityEntry = {
+  slot?: number
+  is_hidden?: boolean
+  ability?: { name?: string }
+}
+
 type EvolutionChainNode = {
   species?: { name?: string; url?: string }
   evolves_to?: EvolutionChainNode[]
@@ -91,6 +98,24 @@ const buildLevelUpMoves = (moves: PokemonMoveEntry[]): LevelUpMove[] => {
       if (a.level !== b.level) return a.level - b.level
       return a.moveId.localeCompare(b.moveId)
     })
+}
+
+const chooseAbility = (abilities: PokemonAbilityEntry[], types: TypeId[]) => {
+  const ordered = [...abilities].sort((a, b) => {
+    const hiddenA = Boolean(a.is_hidden)
+    const hiddenB = Boolean(b.is_hidden)
+    if (hiddenA !== hiddenB) return hiddenA ? 1 : -1
+    return (a.slot ?? 999) - (b.slot ?? 999)
+  })
+
+  for (const entry of ordered) {
+    const rawName = entry.ability?.name
+    if (!rawName) continue
+    const mapped = resolveAbilityFromPokeApi(rawName)
+    if (mapped) return mapped
+  }
+
+  return defaultAbilityForTypes(types)
 }
 
 const findEvolutionNode = (
@@ -155,6 +180,7 @@ export const fetchPokemonSpecies = async (nameOrId: string | number): Promise<Po
   const sprite =
     data.sprites?.other?.['official-artwork']?.front_default ?? data.sprites?.front_default ?? null
   const levelUpMoves = buildLevelUpMoves(data.moves ?? [])
+  const ability = chooseAbility(data.abilities ?? [], types)
 
   let evolution: EvolutionData | null = null
   try {
@@ -182,6 +208,7 @@ export const fetchPokemonSpecies = async (nameOrId: string | number): Promise<Po
     baseStats: mapStats(data.stats ?? []),
     baseExp: data.base_experience ?? 64,
     sprite,
+    ability,
     levelUpMoves,
     evolution,
   }

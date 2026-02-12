@@ -19,6 +19,11 @@ export type PokemonInstance = {
   status: StatusId
   statusTurns: number
   statStages: StatStages
+  abilityState: {
+    flashFireBoosted: boolean
+    sturdyUsed: boolean
+    intimidateApplied: boolean
+  }
   moves: MoveState[]
 }
 
@@ -30,6 +35,12 @@ const createStatStages = (): StatStages => ({
   spa: 0,
   spd: 0,
   spe: 0,
+})
+
+const createAbilityState = () => ({
+  flashFireBoosted: false,
+  sturdyUsed: false,
+  intimidateApplied: false,
 })
 
 export const expForLevel = (level: number) => Math.floor((4 * level ** 3) / 5)
@@ -141,6 +152,7 @@ export const createPokemonInstance = (
     status: 'none',
     statusTurns: 0,
     statStages: createStatStages(),
+    abilityState: createAbilityState(),
     moves,
   }
 }
@@ -197,4 +209,5 @@ export const getPendingEvolution = (pokemon: PokemonInstance) => {
 export const resetBattleStages = (pokemon: PokemonInstance) => {
   pokemon.statStages = createStatStages()
   pokemon.statusTurns = pokemon.status === 'sleep' ? pokemon.statusTurns : 0
+  pokemon.abilityState = createAbilityState()
 }

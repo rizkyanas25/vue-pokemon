@@ -18,6 +18,7 @@ import type { TypeId } from '../data/battle/types'
 import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
 import { SHOPS } from '../data/shops'
 import { getMoveData } from '../data/battle/moves'
+import { defaultAbilityForTypes } from '../data/battle/abilities'
 import {
   TRAINER_SPRITES,
   trainerSprite,
@@ -159,14 +160,16 @@ export const useGameStore = defineStore('game', () => {
   const buildPlaceholderSpecies = (keyOrId: string | number): PokemonSpecies => {
     const key = typeof keyOrId === 'string' ? normalizeSpeciesKey(keyOrId) : `pokemon-${keyOrId}`
     const id = typeof keyOrId === 'number' ? keyOrId : 0
+    const types: TypeId[] = ['normal']
     return {
       key,
       id,
       name: titleCase(typeof keyOrId === 'string' ? keyOrId : `Pokemon ${keyOrId}`),
-      types: ['normal'],
+      types,
       baseStats: placeholderStats,
       baseExp: 50,
       sprite: null,
+      ability: defaultAbilityForTypes(types),
     }
   }
 
@@ -1026,13 +1029,17 @@ export const useGameStore = defineStore('game', () => {
 
     return {
       ...pokemon,
-      species,
+      species: {
+        ...species,
+        ability: species.ability ?? defaultAbilityForTypes(species.types),
+      },
       name: pokemon.name ?? species.name,
       level,
       exp: pokemon.exp ?? expForLevel(level),
       status: pokemon.status ?? 'none',
       statusTurns: pokemon.statusTurns ?? 0,
       statStages: pokemon.statStages ?? { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+      abilityState: pokemon.abilityState ?? template.abilityState,
       currentHp,
       moves,
       stats,

@@ -1,5 +1,6 @@
 import type { Stats, TypeId } from './types'
 import type { MoveId } from './moves'
+import type { AbilityId } from './abilities'
 
 export type SpeciesKey = 'pikachu' | 'bulbasaur' | 'charmander' | 'squirtle'
 
@@ -23,6 +24,7 @@ export type PokemonSpecies = {
   baseStats: Stats
   baseExp: number
   sprite?: string | null
+  ability?: AbilityId
   levelUpMoves?: LevelUpMove[]
   evolution?: EvolutionData | null
 }
@@ -43,6 +45,7 @@ export const STARTERS: StarterDefinition[] = [
       types: ['grass', 'poison'],
       baseStats: { hp: 45, atk: 49, def: 49, spa: 65, spd: 65, spe: 45 },
       baseExp: 64,
+      ability: 'overgrow',
       levelUpMoves: [
         { level: 1, moveId: 'tackle' },
         { level: 3, moveId: 'growl' },
@@ -67,6 +70,7 @@ export const STARTERS: StarterDefinition[] = [
       types: ['fire'],
       baseStats: { hp: 39, atk: 52, def: 43, spa: 60, spd: 50, spe: 65 },
       baseExp: 62,
+      ability: 'blaze',
       levelUpMoves: [
         { level: 1, moveId: 'scratch' },
         { level: 1, moveId: 'growl' },
@@ -91,6 +95,7 @@ export const STARTERS: StarterDefinition[] = [
       types: ['water'],
       baseStats: { hp: 44, atk: 48, def: 65, spa: 50, spd: 64, spe: 43 },
       baseExp: 63,
+      ability: 'torrent',
       levelUpMoves: [
         { level: 1, moveId: 'tackle' },
         { level: 4, moveId: 'tail_whip' },
@@ -115,6 +120,7 @@ export const STARTERS: StarterDefinition[] = [
       types: ['electric'],
       baseStats: { hp: 35, atk: 55, def: 40, spa: 50, spd: 50, spe: 90 },
       baseExp: 112,
+      ability: 'static',
       levelUpMoves: [
         { level: 1, moveId: 'thunder_shock' },
         { level: 1, moveId: 'growl' },

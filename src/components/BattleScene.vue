@@ -4,6 +4,7 @@ import { useGameStore } from '../stores/gameStore'
 import { getMoveData } from '../data/battle/moves'
 import { resetBattleStages } from '../engine/pokemon'
 import {
+  applyBattleEntryAbilities,
   applyEndOfTurnStatus,
   attemptCatch,
   chooseMove,
@@ -14,6 +15,7 @@ import {
 } from '../engine/battle'
 import type { MoveState, PokemonInstance } from '../engine/pokemon'
 import { ITEM_CATALOG, isCatchItem, type ItemId } from '../data/items'
+import { getAbilityName } from '../data/battle/abilities'
 
 import pikachuImg from '@/assets/sprites/pikachu.png'
 import bulbasaurImg from '@/assets/sprites/bulbasaur.png'
@@ -219,6 +221,8 @@ const getTypes = (pokemon: PokemonInstance | null) => {
 
 const playerTypes = computed(() => getTypes(playerPokemon.value ?? null))
 const enemyTypes = computed(() => getTypes(enemyPokemon.value))
+const playerAbilityName = computed(() => getAbilityName(playerPokemon.value?.species.ability))
+const enemyAbilityName = computed(() => getAbilityName(enemyPokemon.value?.species.ability))
 
 const battleBackgroundStyle = computed(() => {
   const terrain = store.battle?.terrain ?? 'grass'
@@ -816,14 +820,19 @@ onMounted(() => {
   }, 50)
 
   if (enemy) {
+    const lines: string[] = []
     if (isTrainerBattle.value) {
-      queueMessages([
+      lines.push(
         `${trainerName.value} wants to battle!`,
         `${trainerName.value} sent out ${enemy.name}!`,
-      ])
+      )
     } else {
-      queueMessages([`A wild ${enemy.name} appeared!`])
+      lines.push(`A wild ${enemy.name} appeared!`)
     }
+    if (player) {
+      lines.push(...applyBattleEntryAbilities(player, enemy))
+    }
+    queueMessages(lines)
   }
 })
 </script>
@@ -842,6 +851,7 @@ onMounted(() => {
             {{ type === 'unknown' ? '???' : type.toUpperCase() }}
           </span>
         </div>
+        <div v-if="enemyAbilityName" class="ability-text">Ability: {{ enemyAbilityName }}</div>
         <div class="hp-bar">
           <div
             class="hp-fill"
@@ -912,6 +922,7 @@ onMounted(() => {
             {{ type === 'unknown' ? '???' : type.toUpperCase() }}
           </span>
         </div>
+        <div v-if="playerAbilityName" class="ability-text">Ability: {{ playerAbilityName }}</div>
         <div class="hp-bar">
           <div
             class="hp-fill"
@@ -1454,6 +1465,12 @@ onMounted(() => {
   background: #ddd;
 }
 
+.ability-text {
+  margin-top: 4px;
+  font-size: 9px;
+  color: #333;
+}
+
 .type-normal {
   background: #a8a878;
 }
@@ -1737,6 +1754,10 @@ onMounted(() => {
 
   .hp-text {
     font-size: 10px;
+  }
+
+  .ability-text {
+    font-size: 8px;
   }
 
   /* Sprites */

@@ -1,5 +1,6 @@
 import { getMoveData, type MoveData, type MoveId } from '../data/battle/moves'
 import { getTypeMultiplier } from '../data/battle/typeChart'
+import { getAbilityName } from '../data/battle/abilities'
 import type { StatKey, StatusId } from '../data/battle/types'
 import type { PokemonInstance } from './pokemon'
 
@@ -132,6 +133,110 @@ const inflictStatus = (target: PokemonInstance, status: StatusId) => {
   }
 }
 
+const isLowHp = (pokemon: PokemonInstance) => pokemon.currentHp <= Math.floor(pokemon.stats.hp / 3)
+
+const getAbilityTypeBoost = (attacker: PokemonInstance, moveType: string) => {
+  const ability = attacker.species.ability
+  if (!ability) return 1
+
+  if (ability === 'overgrow' && moveType === 'grass' && isLowHp(attacker)) return 1.5
+  if (ability === 'blaze' && moveType === 'fire' && isLowHp(attacker)) return 1.5
+  if (ability === 'torrent' && moveType === 'water' && isLowHp(attacker)) return 1.5
+  if (ability === 'flash_fire' && moveType === 'fire' && attacker.abilityState.flashFireBoosted) return 1.5
+  return 1
+}
+
+const healFromAbsorbAbility = (pokemon: PokemonInstance, ratio: number) => {
+  const healAmount = Math.max(1, Math.floor(pokemon.stats.hp * ratio))
+  const before = pokemon.currentHp
+  pokemon.currentHp = Math.min(pokemon.stats.hp, pokemon.currentHp + healAmount)
+  return pokemon.currentHp - before
+}
+
+const applyDefenderPreHitAbility = (
+  attacker: PokemonInstance,
+  defender: PokemonInstance,
+  moveData: MoveData,
+) => {
+  const ability = defender.species.ability
+  if (!ability) return { blocked: false, messages: [] as string[] }
+
+  if (ability === 'levitate' && moveData.type === 'ground') {
+    return {
+      blocked: true,
+      messages: [`${defender.name} is immune with ${getAbilityName(ability)}!`],
+    }
+  }
+
+  if (ability === 'water_absorb' && moveData.type === 'water') {
+    const healed = healFromAbsorbAbility(defender, 0.25)
+    const healMessage = healed > 0 ? `${defender.name} restored HP!` : `${defender.name} is already at full HP!`
+    return {
+      blocked: true,
+      messages: [`${defender.name}'s ${getAbilityName(ability)} absorbed the attack!`, healMessage],
+    }
+  }
+
+  if (ability === 'volt_absorb' && moveData.type === 'electric') {
+    const healed = healFromAbsorbAbility(defender, 0.25)
+    const healMessage = healed > 0 ? `${defender.name} restored HP!` : `${defender.name} is already at full HP!`
+    return {
+      blocked: true,
+      messages: [`${defender.name}'s ${getAbilityName(ability)} absorbed the attack!`, healMessage],
+    }
+  }
+
+  if (ability === 'flash_fire' && moveData.type === 'fire') {
+    defender.abilityState.flashFireBoosted = true
+    return {
+      blocked: true,
+      messages: [`${defender.name}'s ${getAbilityName(ability)} activated!`],
+    }
+  }
+
+  return { blocked: false, messages: [] as string[] }
+}
+
+const applyContactAbilityEffects = (
+  attacker: PokemonInstance,
+  defender: PokemonInstance,
+  moveData: MoveData,
+  damageDealt: number,
+) => {
+  const messages: string[] = []
+
+  if (damageDealt <= 0) return messages
+  if (moveData.category !== 'physical') return messages
+  if (defender.species.ability !== 'static') return messages
+  if (attacker.status !== 'none') return messages
+
+  if (Math.random() < 0.3) {
+    const result = inflictStatus(attacker, 'paralyze')
+    if (result.message) messages.push(`${defender.name}'s ${getAbilityName('static')} activated!`)
+    if (result.message) messages.push(result.message)
+  }
+
+  return messages
+}
+
+const applyIntimidate = (source: PokemonInstance, target: PokemonInstance) => {
+  if (source.species.ability !== 'intimidate') return [] as string[]
+  if (source.abilityState.intimidateApplied) return [] as string[]
+
+  source.abilityState.intimidateApplied = true
+  const before = target.statStages.atk
+  if (before <= -6) {
+    return [`${source.name}'s ${getAbilityName('intimidate')} had no effect.`]
+  }
+
+  target.statStages.atk = clamp(before - 1, -6, 6)
+  return [`${source.name}'s ${getAbilityName('intimidate')} lowered ${target.name}'s Attack!`]
+}
+
+export const applyBattleEntryAbilities = (player: PokemonInstance, enemy: PokemonInstance) => {
+  return [...applyIntimidate(enemy, player), ...applyIntimidate(player, enemy)]
+}
+
 export const resolveMove = (
   attacker: PokemonInstance,
   defender: PokemonInstance,
@@ -150,6 +255,15 @@ export const resolveMove = (
   if (accuracyRoll > moveData.accuracy) {
     messages.push(`${attacker.name}'s attack missed!`)
     return { messages, didHit: false, canAct: true }
+  }
+
+  const targetsEnemy = moveData.category !== 'status' || moveData.effect?.target !== 'self'
+  if (targetsEnemy) {
+    const abilityCheck = applyDefenderPreHitAbility(attacker, defender, moveData)
+    if (abilityCheck.blocked) {
+      messages.push(...abilityCheck.messages)
+      return { messages, didHit: true, canAct: true }
+    }
   }
 
   if (moveData.category === 'status') {
@@ -181,13 +295,21 @@ export const resolveMove = (
   }
 
   const power = moveData.power ?? 0
-  const attackStat =
-    moveData.category === 'physical' ? getEffectiveStat(attacker, 'atk') : getEffectiveStat(attacker, 'spa')
+  let attackStat =
+    moveData.category === 'physical'
+      ? getEffectiveStat(attacker, 'atk')
+      : getEffectiveStat(attacker, 'spa')
   const defenseStat =
-    moveData.category === 'physical' ? getEffectiveStat(defender, 'def') : getEffectiveStat(defender, 'spd')
+    moveData.category === 'physical'
+      ? getEffectiveStat(defender, 'def')
+      : getEffectiveStat(defender, 'spd')
+
+  if (moveData.category === 'physical' && attacker.species.ability === 'guts' && attacker.status !== 'none') {
+    attackStat = Math.floor(attackStat * 1.5)
+  }
 
   const levelFactor = (2 * attacker.level) / 5 + 2
-  let baseDamage = Math.floor(((levelFactor * power * attackStat) / defenseStat) / 50) + 2
+  const baseDamage = Math.floor(((levelFactor * power * attackStat) / defenseStat) / 50) + 2
 
   const attackerTypes = attacker.species.types
   const defenderTypes = defender.species.types
@@ -202,12 +324,37 @@ export const resolveMove = (
   }
 
   let modifier = stab * typeMultiplier * crit * random
-  if (attacker.status === 'burn' && moveData.category === 'physical') {
+  modifier *= getAbilityTypeBoost(attacker, moveData.type)
+
+  if (defender.species.ability === 'thick_fat' && (moveData.type === 'fire' || moveData.type === 'ice')) {
     modifier *= 0.5
   }
 
-  const damage = Math.max(1, Math.floor(baseDamage * modifier))
+  if (
+    attacker.status === 'burn' &&
+    moveData.category === 'physical' &&
+    attacker.species.ability !== 'guts'
+  ) {
+    modifier *= 0.5
+  }
+
+  const predictedDamage = Math.max(1, Math.floor(baseDamage * modifier))
+  const defenderHpBefore = defender.currentHp
+  let damage = predictedDamage
+
+  if (
+    defender.species.ability === 'sturdy' &&
+    !defender.abilityState.sturdyUsed &&
+    defenderHpBefore === defender.stats.hp &&
+    damage >= defenderHpBefore
+  ) {
+    defender.abilityState.sturdyUsed = true
+    damage = defenderHpBefore - 1
+    messages.push(`${defender.name} endured the hit with ${getAbilityName('sturdy')}!`)
+  }
+
   defender.currentHp = Math.max(0, defender.currentHp - damage)
+  const damageDealt = defenderHpBefore - defender.currentHp
 
   if (crit > 1) messages.push('A critical hit!')
   if (typeMultiplier > 1) messages.push("It's super effective!")
@@ -221,6 +368,8 @@ export const resolveMove = (
       if (result.message) messages.push(result.message)
     }
   }
+
+  messages.push(...applyContactAbilityEffects(attacker, defender, moveData, damageDealt))
 
   return { messages, didHit: true, canAct: true }
 }
@@ -285,8 +434,27 @@ const estimateDamageScore = (
   const typeMultiplier = getTypeMultiplier(moveData.type, defender.species.types)
   if (typeMultiplier === 0) return -100
 
+  const absorbAbility = defender.species.ability
+  if (
+    (absorbAbility === 'levitate' && moveData.type === 'ground') ||
+    (absorbAbility === 'water_absorb' && moveData.type === 'water') ||
+    (absorbAbility === 'volt_absorb' && moveData.type === 'electric') ||
+    (absorbAbility === 'flash_fire' && moveData.type === 'fire')
+  ) {
+    return -100
+  }
+
+  const abilityBoost = getAbilityTypeBoost(attacker, moveData.type)
+  const defenseAbilityMod =
+    defender.species.ability === 'thick_fat' && (moveData.type === 'fire' || moveData.type === 'ice')
+      ? 0.5
+      : 1
+
   const expectedBase = ((2 * attacker.level) / 5 + 2) * power * (attackStat / Math.max(1, defenseStat))
-  const expectedDamage = Math.max(1, Math.floor((expectedBase / 50 + 2) * stab * typeMultiplier))
+  const expectedDamage = Math.max(
+    1,
+    Math.floor((expectedBase / 50 + 2) * stab * typeMultiplier * abilityBoost * defenseAbilityMod),
+  )
   const accuracyFactor = moveData.accuracy / 100
 
   let score = expectedDamage * accuracyFactor
@@ -306,6 +474,16 @@ const evaluateStatusMove = (
   let score = 12
   const effect = moveData.effect
   if (!effect) return score
+
+  if (
+    effect.target !== 'self' &&
+    ((defender.species.ability === 'levitate' && moveData.type === 'ground') ||
+      (defender.species.ability === 'water_absorb' && moveData.type === 'water') ||
+      (defender.species.ability === 'volt_absorb' && moveData.type === 'electric') ||
+      (defender.species.ability === 'flash_fire' && moveData.type === 'fire'))
+  ) {
+    score -= 40
+  }
 
   if (effect.status) {
     const target = effect.target === 'self' ? attacker : defender
