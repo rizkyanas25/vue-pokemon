@@ -46,7 +46,7 @@ export type GameState =
   | 'SHOP'
   | 'TRAINER_SELECT'
   | 'TRANSITION'
-export type MenuTab = 'party' | 'bag' | 'pokedex' | 'save'
+export type MenuTab = 'party' | 'pc' | 'bag' | 'pokedex' | 'save'
 
 export type BagItem = {
   id: ItemId
@@ -92,6 +92,7 @@ const placeholderStats = { hp: 50, atk: 50, def: 50, spa: 50, spd: 50, spe: 50 }
 export const useGameStore = defineStore('game', () => {
   const MOVE_ANIM_MS = 200
   const GLITCH_MS = 520
+  const PARTY_LIMIT = 6
   const LEGENDARY_IDS = new Set([144, 145, 146, 150, 151])
   const LEGENDARY_POOL = [144, 145, 146, 150, 151]
   const LEGENDARY_CHANCE = 0.1
@@ -137,6 +138,7 @@ export const useGameStore = defineStore('game', () => {
     { id: 'potion', qty: 3 },
     { id: 'pokeball', qty: 5 },
   ])
+  const boxedPokemon = ref<PokemonInstance[]>([])
 
   const saveKey = 'pokemon-vue-save-v3'
   const MAP_VERSION = 5
@@ -1010,15 +1012,45 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function catchPokemon(pokemon: PokemonInstance) {
-    if (player.value.party.length < 6) {
+    if (player.value.party.length < PARTY_LIMIT) {
       pokemon.status = 'none'
       pokemon.statusTurns = 0
       player.value.party.push(pokemon)
       markCaught(pokemon.species)
       return { added: true, message: `${pokemon.name} was added to your party!` }
     }
+    pokemon.status = 'none'
+    pokemon.statusTurns = 0
+    boxedPokemon.value.push(pokemon)
     markCaught(pokemon.species)
-    return { added: false, message: `Your party is full! ${pokemon.name} was released...` }
+    return { added: false, message: `Your party is full! ${pokemon.name} was sent to the PC Box.` }
+  }
+
+  function movePartyPokemonToBox(index: number) {
+    if (index < 0 || index >= player.value.party.length) return 'Invalid party slot.'
+    if (player.value.party.length <= 1) return 'You need at least 1 Pokemon in your party.'
+
+    const [moved] = player.value.party.splice(index, 1)
+    if (!moved) return 'Failed to move Pokemon.'
+    boxedPokemon.value.push(moved)
+
+    if (player.value.activeIndex >= player.value.party.length) {
+      player.value.activeIndex = Math.max(0, player.value.party.length - 1)
+    } else if (index < player.value.activeIndex) {
+      player.value.activeIndex -= 1
+    }
+
+    return `${moved.name} was moved to the PC Box.`
+  }
+
+  function moveBoxPokemonToParty(index: number) {
+    if (index < 0 || index >= boxedPokemon.value.length) return 'Invalid PC slot.'
+    if (player.value.party.length >= PARTY_LIMIT) return 'Your party is full.'
+
+    const [moved] = boxedPokemon.value.splice(index, 1)
+    if (!moved) return 'Failed to move Pokemon.'
+    player.value.party.push(moved)
+    return `${moved.name} joined your party.`
   }
 
   function addMoney(amount: number) {
@@ -1057,10 +1089,11 @@ export const useGameStore = defineStore('game', () => {
 
   function serializeGame() {
     return {
-      version: 4,
+      version: 5,
       savedAt: new Date().toISOString(),
       player: player.value,
       playerTrainer: playerTrainer.value,
+      boxedPokemon: boxedPokemon.value,
       bag: bag.value,
       money: money.value,
       pokedex: pokedex.value,
@@ -1160,12 +1193,24 @@ export const useGameStore = defineStore('game', () => {
       if (!data?.player?.party) return false
 
       const restoredParty = (data.player.party as PokemonInstance[]).map(normalizePokemon)
+      const restoredBox = Array.isArray(data.boxedPokemon)
+        ? (data.boxedPokemon as PokemonInstance[]).map(normalizePokemon)
+        : []
+      const normalizedParty = restoredParty.slice(0, PARTY_LIMIT)
+      if (restoredParty.length > PARTY_LIMIT) {
+        restoredBox.unshift(...restoredParty.slice(PARTY_LIMIT))
+      }
+      if (normalizedParty.length === 0 && restoredBox.length > 0) {
+        const candidate = restoredBox.shift()
+        if (candidate) normalizedParty.push(candidate)
+      }
       player.value = {
         ...player.value,
         ...data.player,
-        party: restoredParty,
+        party: normalizedParty,
       }
-      if (player.value.activeIndex >= restoredParty.length) {
+      boxedPokemon.value = restoredBox
+      if (player.value.activeIndex >= normalizedParty.length) {
         player.value.activeIndex = 0
       }
 
@@ -1340,6 +1385,7 @@ export const useGameStore = defineStore('game', () => {
       const moveOverrides = starter?.defaultMoves
       const instance = createPokemonInstance(species, 5, moveOverrides)
       player.value.party = [instance]
+      boxedPokemon.value = []
       player.value.activeIndex = 0
       worldPos.value = { x: 1, y: 1 }
       setCurrentMap(worldPos.value.x, worldPos.value.y)
@@ -1429,6 +1475,7 @@ export const useGameStore = defineStore('game', () => {
     battleTransition,
     menuTab,
     bag,
+    boxedPokemon,
     money,
     currentShopId,
     pokedex,
@@ -1448,6 +1495,8 @@ export const useGameStore = defineStore('game', () => {
     useItem,
     useCatchItem,
     catchPokemon,
+    movePartyPokemonToBox,
+    moveBoxPokemonToParty,
     applyBattleProgression,
     addMoney,
     openShop,

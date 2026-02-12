@@ -8,6 +8,7 @@ const actionMessage = ref('')
 
 const tabs: Array<{ id: MenuTab; label: string }> = [
   { id: 'party', label: 'Party' },
+  { id: 'pc', label: 'PC Box' },
   { id: 'bag', label: 'Bag' },
   { id: 'pokedex', label: 'Pokedex' },
   { id: 'save', label: 'Save' },
@@ -21,9 +22,18 @@ const pokedexList = computed(() =>
 )
 
 const party = computed(() => store.player.party)
+const pcBox = computed(() => store.boxedPokemon)
 
 const usePotion = (index: number) => {
   actionMessage.value = store.useItem('potion', index)
+}
+
+const moveToPc = (index: number) => {
+  actionMessage.value = store.movePartyPokemonToBox(index)
+}
+
+const moveToParty = (index: number) => {
+  actionMessage.value = store.moveBoxPokemonToParty(index)
 }
 
 const doSave = () => {
@@ -72,8 +82,46 @@ const doLoad = async () => {
             <div class="party-sub">
               Status: {{ member.status === 'none' ? 'OK' : member.status.toUpperCase() }}
             </div>
-            <button class="small-btn" @click.stop="usePotion(index)">Use Potion</button>
+            <div class="party-actions">
+              <button class="small-btn" @click.stop="usePotion(index)">Use Potion</button>
+              <button class="small-btn" @click.stop="moveToPc(index)">Move To PC</button>
+            </div>
           </div>
+        </div>
+
+        <div v-else-if="store.menuTab === 'pc'" class="pc-layout">
+          <section class="pc-section">
+            <h3 class="pc-title">Party ({{ party.length }}/6)</h3>
+            <div class="pc-grid">
+              <div v-for="(member, index) in party" :key="`party-${member.id}`" class="pc-card">
+                <div class="party-title">
+                  <span>{{ member.name }}</span>
+                  <span>Lv{{ member.level }}</span>
+                </div>
+                <div class="party-hp">HP {{ member.currentHp }} / {{ member.stats.hp }}</div>
+                <button class="small-btn" @click="moveToPc(index)">Store</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="pc-section">
+            <h3 class="pc-title">PC Box ({{ pcBox.length }})</h3>
+            <div v-if="pcBox.length === 0" class="pc-empty">PC Box is empty.</div>
+            <div v-else class="pc-grid">
+              <div v-for="(member, index) in pcBox" :key="`box-${member.id}`" class="pc-card">
+                <div class="party-title">
+                  <span>{{ member.name }}</span>
+                  <span>Lv{{ member.level }}</span>
+                </div>
+                <div class="party-sub">
+                  Status: {{ member.status === 'none' ? 'OK' : member.status.toUpperCase() }}
+                </div>
+                <button class="small-btn" :disabled="party.length >= 6" @click="moveToParty(index)">
+                  Add To Party
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
 
         <div v-else-if="store.menuTab === 'bag'" class="bag-list">
@@ -218,6 +266,12 @@ const doLoad = async () => {
   font-size: 11px;
 }
 
+.party-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .small-btn {
   padding: 6px 8px;
   border: 1px solid #555;
@@ -230,6 +284,47 @@ const doLoad = async () => {
 .bag-list {
   display: grid;
   gap: 12px;
+}
+
+.pc-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.pc-section {
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #1b1b1b;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.pc-title {
+  margin: 0;
+  font-size: 11px;
+}
+
+.pc-grid {
+  display: grid;
+  gap: 8px;
+  max-height: 48vh;
+  overflow-y: auto;
+}
+
+.pc-card {
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #151515;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.pc-empty {
+  color: #888;
+  font-size: 10px;
 }
 
 .bag-item {
@@ -324,5 +419,16 @@ const doLoad = async () => {
   border-top: 1px solid #2c2c2c;
   font-size: 11px;
   background: #161616;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .pc-layout {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
