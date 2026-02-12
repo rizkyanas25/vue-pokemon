@@ -8,6 +8,7 @@ import {
   overworldSpawn,
   pokemonCenterRespawn,
 } from '../data/overworld'
+import { INTERIORS, type InteriorId } from '../data/interiors'
 import {
   applyExperience,
   calculateStats,
@@ -120,6 +121,14 @@ export const useGameStore = defineStore('game', () => {
   const encounterLock = ref(false)
   const menuTab = ref<MenuTab>('party')
   const worldPos = ref({ x: 1, y: 1 })
+  const currentInteriorId = ref<InteriorId | null>(null)
+  const interiorReturn = ref<{
+    mapX: number
+    mapY: number
+    x: number
+    y: number
+    direction: Direction
+  } | null>(null)
   const mapCache = ref<Record<string, TileId[][]>>({})
   const npcCache = ref<Record<string, NpcData[]>>({})
   const money = ref(3000)
@@ -130,7 +139,7 @@ export const useGameStore = defineStore('game', () => {
   ])
 
   const saveKey = 'pokemon-vue-save-v3'
-  const MAP_VERSION = 4
+  const MAP_VERSION = 5
   const legacySaveKey = 'pokemon-vue-save-v2'
   const legacySaveKeyV1 = 'pokemon-vue-save-v1'
   const hasSaveData = ref(false)
@@ -303,6 +312,11 @@ export const useGameStore = defineStore('game', () => {
 
   const markSeen = (species: PokemonSpecies) => upsertDexEntry(species, false)
   const markCaught = (species: PokemonSpecies) => upsertDexEntry(species, true)
+  const cloneNpc = (npc: NpcData): NpcData => ({
+    ...npc,
+    dialog: [...npc.dialog],
+  })
+  const cloneNpcList = (list: NpcData[]) => list.map(cloneNpc)
 
   const getNpcAt = (x: number, y: number) => npcs.value.find((npc) => npc.x === x && npc.y === y)
 
@@ -585,7 +599,7 @@ export const useGameStore = defineStore('game', () => {
     mapCache.value[key] = tiles
 
     const reachable = buildReachableSet(tiles)
-    const baseNpcs = isCenter ? [...overworldNpcs] : []
+    const baseNpcs = isCenter ? cloneNpcList(overworldNpcs) : []
     const npcList = [...baseNpcs]
     const spawnCount = isCenter ? 1 : Math.random() < 0.6 ? 1 : 0
     for (let i = 0; i < spawnCount; i += 1) {
@@ -602,6 +616,8 @@ export const useGameStore = defineStore('game', () => {
   const setCurrentMap = (x: number, y: number) => {
     const key = ensureMapAt(x, y)
     worldPos.value = { x, y }
+    currentInteriorId.value = null
+    interiorReturn.value = null
     currentMap.value = mapCache.value[key] ?? overworldMap.tiles
     const reachable = buildReachableSet(currentMap.value)
     const npcList = (npcCache.value[key] ?? []).filter(
@@ -609,6 +625,48 @@ export const useGameStore = defineStore('game', () => {
     )
     npcCache.value[key] = npcList
     npcs.value = npcList
+  }
+
+  const setInteriorMap = (id: InteriorId) => {
+    const interior = INTERIORS[id]
+    currentInteriorId.value = id
+    currentMap.value = interior.tiles.map((row) => [...row])
+    npcs.value = cloneNpcList(interior.npcs)
+  }
+
+  const enterInterior = (id: InteriorId) => {
+    const interior = INTERIORS[id]
+    if (!interior) return
+    interiorReturn.value = {
+      mapX: worldPos.value.x,
+      mapY: worldPos.value.y,
+      x: player.value.x,
+      y: player.value.y,
+      direction: player.value.direction,
+    }
+    setInteriorMap(id)
+    player.value.x = interior.spawn.x
+    player.value.y = interior.spawn.y
+    player.value.direction = 'down'
+    player.value.step = 0
+    ensurePlayerOnWalkable()
+  }
+
+  const leaveInterior = () => {
+    const returnPoint = interiorReturn.value
+    if (!returnPoint) return
+    setCurrentMap(returnPoint.mapX, returnPoint.mapY)
+    player.value.x = returnPoint.x
+    player.value.y = returnPoint.y
+    player.value.direction = returnPoint.direction
+    player.value.step = 0
+    ensurePlayerOnWalkable()
+  }
+
+  const isOnInteriorExitTile = () => {
+    if (!currentInteriorId.value) return false
+    const interior = INTERIORS[currentInteriorId.value]
+    return interior.exitTiles.some((tile) => tile.x === player.value.x && tile.y === player.value.y)
   }
 
   const isWalkable = (x: number, y: number) => {
@@ -651,6 +709,7 @@ export const useGameStore = defineStore('game', () => {
     const height = currentMap.value.length
 
     const tryTransition = () => {
+      if (currentInteriorId.value) return false
       const nextWorldX = worldPos.value.x + Math.sign(dx)
       const nextWorldY = worldPos.value.y + Math.sign(dy)
       if (nextWorldX < 0 || nextWorldX > 2 || nextWorldY < 0 || nextWorldY > 2) return false
@@ -702,6 +761,10 @@ export const useGameStore = defineStore('game', () => {
     }
 
     if (newX < 0 || newX > width - 1 || newY < 0 || newY > height - 1) {
+      if (currentInteriorId.value && isOnInteriorExitTile()) {
+        leaveInterior()
+        return
+      }
       if (tryTransition()) return
       return
     }
@@ -717,17 +780,19 @@ export const useGameStore = defineStore('game', () => {
     player.value.y = newY
     player.value.step = (player.value.step + 1) % 2
 
-    const nearbyTrainer = findAdjacentTrainer()
-    if (nearbyTrainer) {
-      void startTrainerBattle(nearbyTrainer, tile)
-      return
-    }
+    if (!currentInteriorId.value) {
+      const nearbyTrainer = findAdjacentTrainer()
+      if (nearbyTrainer) {
+        void startTrainerBattle(nearbyTrainer, tile)
+        return
+      }
 
-    if (tile === TILE.BUSH && Math.random() < 0.12) {
-      void startWildBattle(tile)
-    }
+      if (tile === TILE.BUSH && Math.random() < 0.12) {
+        void startWildBattle(tile)
+      }
 
-    maybeSpawnTrainer(mapKey(worldPos.value.x, worldPos.value.y))
+      maybeSpawnTrainer(mapKey(worldPos.value.x, worldPos.value.y))
+    }
   }
 
   function setDirection(dir: Direction) {
@@ -780,6 +845,7 @@ export const useGameStore = defineStore('game', () => {
   function startWildBattle(tile?: TileId) {
     if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value)
       return Promise.resolve()
+    if (currentInteriorId.value) return Promise.resolve()
     const activePokemon = player.value.party[player.value.activeIndex]
     if (!activePokemon) return Promise.resolve()
 
@@ -991,7 +1057,7 @@ export const useGameStore = defineStore('game', () => {
 
   function serializeGame() {
     return {
-      version: 3,
+      version: 4,
       savedAt: new Date().toISOString(),
       player: player.value,
       playerTrainer: playerTrainer.value,
@@ -1000,6 +1066,8 @@ export const useGameStore = defineStore('game', () => {
       pokedex: pokedex.value,
       speciesCache: speciesCache.value,
       worldPos: worldPos.value,
+      currentInteriorId: currentInteriorId.value,
+      interiorReturn: interiorReturn.value,
       mapVersion: MAP_VERSION,
       mapCache: mapCache.value,
       npcCache: npcCache.value,
@@ -1139,7 +1207,55 @@ export const useGameStore = defineStore('game', () => {
       mapCache.value = shouldResetMaps ? {} : (data.mapCache ?? mapCache.value)
       npcCache.value = shouldResetMaps ? {} : (data.npcCache ?? npcCache.value)
 
-      setCurrentMap(worldPos.value.x, worldPos.value.y)
+      const loadedInteriorId =
+        typeof data.currentInteriorId === 'string' &&
+        Object.prototype.hasOwnProperty.call(INTERIORS, data.currentInteriorId)
+          ? (data.currentInteriorId as InteriorId)
+          : null
+
+      const rawReturn =
+        data.interiorReturn && typeof data.interiorReturn === 'object'
+          ? (data.interiorReturn as Partial<{
+              mapX: number
+              mapY: number
+              x: number
+              y: number
+              direction: Direction
+            }>)
+          : null
+      const normalizedReturn =
+        rawReturn &&
+        typeof rawReturn.mapX === 'number' &&
+        typeof rawReturn.mapY === 'number' &&
+        typeof rawReturn.x === 'number' &&
+        typeof rawReturn.y === 'number'
+          ? {
+              mapX: Math.min(2, Math.max(0, rawReturn.mapX)),
+              mapY: Math.min(2, Math.max(0, rawReturn.mapY)),
+              x: Math.max(0, rawReturn.x),
+              y: Math.max(0, rawReturn.y),
+              direction:
+                rawReturn.direction === 'up' ||
+                rawReturn.direction === 'down' ||
+                rawReturn.direction === 'left' ||
+                rawReturn.direction === 'right'
+                  ? rawReturn.direction
+                  : 'down',
+            }
+          : null
+
+      if (loadedInteriorId) {
+        interiorReturn.value = normalizedReturn ?? {
+          mapX: worldPos.value.x,
+          mapY: worldPos.value.y,
+          x: overworldSpawn.x,
+          y: overworldSpawn.y,
+          direction: 'down',
+        }
+        setInteriorMap(loadedInteriorId)
+      } else {
+        setCurrentMap(worldPos.value.x, worldPos.value.y)
+      }
       ensurePlayerOnWalkable()
       const rawDex = data.pokedex ?? {}
       pokedex.value = Object.entries(rawDex).reduce(
@@ -1256,6 +1372,11 @@ export const useGameStore = defineStore('game', () => {
     const npc = getNpcAt(target.x, target.y)
     if (!npc) return
 
+    if (npc.role === 'portal' && npc.interiorId) {
+      enterInterior(npc.interiorId)
+      return
+    }
+
     if (npc.role === 'center') {
       healPartyFully()
       gameAudio.playSfx('heal')
@@ -1338,6 +1459,7 @@ export const useGameStore = defineStore('game', () => {
     chooseStarter,
     chooseTrainer,
     worldPos,
+    currentInteriorId,
     mapCache,
   }
 })

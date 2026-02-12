@@ -166,7 +166,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Minimap Overlay -->
-    <div class="minimap-overlay" v-if="store.gameState === 'ROAMING'">
+    <div class="minimap-overlay" v-if="store.gameState === 'ROAMING' && !store.currentInteriorId">
       <MiniMap />
     </div>
 

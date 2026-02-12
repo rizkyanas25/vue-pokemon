@@ -40,12 +40,19 @@ const cameraOffset = computed(() => {
   let offsetX = vw / 2 - playerCenterX
   let offsetY = vh / 2 - playerCenterY
 
-  // Clamp so we don't show beyond map edges
-  const minX = vw - totalMapWidth.value
-  const minY = vh - totalMapHeight.value
+  if (totalMapWidth.value <= vw) {
+    offsetX = (vw - totalMapWidth.value) / 2
+  } else {
+    const minX = vw - totalMapWidth.value
+    offsetX = Math.min(0, Math.max(minX, offsetX))
+  }
 
-  offsetX = Math.min(0, Math.max(minX, offsetX))
-  offsetY = Math.min(0, Math.max(minY, offsetY))
+  if (totalMapHeight.value <= vh) {
+    offsetY = (vh - totalMapHeight.value) / 2
+  } else {
+    const minY = vh - totalMapHeight.value
+    offsetY = Math.min(0, Math.max(minY, offsetY))
+  }
 
   return { x: offsetX, y: offsetY }
 })
