@@ -86,6 +86,24 @@ const syncHp = () => {
   if (enemyPokemon.value) displayEnemyHp.value = enemyPokemon.value.currentHp
 }
 
+type HpSnapshot = {
+  playerHp: number
+  enemyHp: number
+}
+
+const captureHpSnapshot = (
+  player: PokemonInstance | null | undefined = playerPokemon.value,
+  enemy: PokemonInstance | null | undefined = enemyPokemon.value,
+): HpSnapshot => ({
+  playerHp: player?.currentHp ?? displayPlayerHp.value,
+  enemyHp: enemy?.currentHp ?? displayEnemyHp.value,
+})
+
+const syncHpSnapshot = (snapshot: HpSnapshot) => {
+  displayPlayerHp.value = snapshot.playerHp
+  displayEnemyHp.value = snapshot.enemyHp
+}
+
 const movesList = computed(() => playerPokemon.value?.moves ?? [])
 
 const clampIndex = (value: number, max: number) => {
@@ -303,6 +321,7 @@ const resolveTurn = async (playerMoveState: MoveState) => {
 
     const hpBefore = action.target.currentHp
     const result = resolveMove(action.actor, action.target, action.move)
+    const actionSnapshot = captureHpSnapshot(player, enemy)
 
     const attackerSide = action.side
     const targetSide = action.side === 'player' ? 'enemy' : 'player'
@@ -331,12 +350,12 @@ const resolveTurn = async (playerMoveState: MoveState) => {
             triggerFlash(targetSide, action.move.type)
             triggerShake(targetSide)
           }
-          syncHp()
+          syncHpSnapshot(actionSnapshot)
         },
       })
 
       for (const msg of restMsgs) {
-        entries.push({ text: msg, onShow: syncHp })
+        entries.push({ text: msg, onShow: () => syncHpSnapshot(actionSnapshot) })
       }
     } else if (damageDealt > 0) {
       // No extra messages but damage was dealt - sync HP after attack message
@@ -348,7 +367,7 @@ const resolveTurn = async (playerMoveState: MoveState) => {
           setTimeout(() => {
             triggerFlash(targetSide, action.move.type)
             triggerShake(targetSide)
-            syncHp()
+            syncHpSnapshot(actionSnapshot)
           }, 350)
         }
       }
@@ -359,7 +378,7 @@ const resolveTurn = async (playerMoveState: MoveState) => {
       entries.push({
         text: `${action.target.name} fainted!`,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(actionSnapshot)
           triggerFaint(faintSide)
         },
       })
@@ -389,29 +408,33 @@ const resolveTurn = async (playerMoveState: MoveState) => {
   } else {
     const endEntries: QueueEntry[] = []
     const playerEnd = applyEndOfTurnStatus(player)
+    const playerEndSnapshot = captureHpSnapshot(player, enemy)
     if (playerEnd.message)
       endEntries.push({
         text: playerEnd.message,
         onShow: () => {
-          syncHp()
-          if (player.currentHp > 0) triggerShake('player')
+          syncHpSnapshot(playerEndSnapshot)
+          if (playerEndSnapshot.playerHp > 0) triggerShake('player')
         },
       })
     const enemyEnd = applyEndOfTurnStatus(enemy)
+    const enemyEndSnapshot = captureHpSnapshot(player, enemy)
     if (enemyEnd.message)
       endEntries.push({
         text: enemyEnd.message,
         onShow: () => {
-          syncHp()
-          if (enemy.currentHp > 0) triggerShake('enemy')
+          syncHpSnapshot(enemyEndSnapshot)
+          if (enemyEndSnapshot.enemyHp > 0) triggerShake('enemy')
         },
       })
+
+    const endSnapshot = captureHpSnapshot(player, enemy)
 
     if (player.currentHp <= 0) {
       endEntries.push({
         text: `${player.name} fainted...`,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(endSnapshot)
           triggerFaint('player')
         },
       })
@@ -421,7 +444,7 @@ const resolveTurn = async (playerMoveState: MoveState) => {
       endEntries.push({
         text: `${enemy.name} fainted!`,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(endSnapshot)
           triggerFaint('enemy')
         },
       })
@@ -452,6 +475,7 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
     const enemyMove = getMoveDataFromState(enemyMoveState)
     const hpBefore = player.currentHp
     const result = resolveMove(enemy, player, enemyMove)
+    const enemyActionSnapshot = captureHpSnapshot(player, enemy)
     const damageDealt = hpBefore - player.currentHp
 
     if (result.canAct) {
@@ -471,12 +495,12 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
               triggerFlash('player', enemyMove.type)
               triggerShake('player')
             }
-            syncHp()
+            syncHpSnapshot(enemyActionSnapshot)
           },
         })
       }
       for (const msg of restMessages) {
-        entries.push({ text: msg, onShow: syncHp })
+        entries.push({ text: msg, onShow: () => syncHpSnapshot(enemyActionSnapshot) })
       }
     } else if (damageDealt > 0) {
       const lastEntry = entries[entries.length - 1]
@@ -487,7 +511,7 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
           setTimeout(() => {
             triggerFlash('player', enemyMove.type)
             triggerShake('player')
-            syncHp()
+            syncHpSnapshot(enemyActionSnapshot)
           }, 350)
         }
       }
@@ -497,10 +521,11 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
   }
 
   if (player.currentHp <= 0) {
+    const faintSnapshot = captureHpSnapshot(player, enemy)
     entries.push({
       text: `${player.name} fainted...`,
       onShow: () => {
-        syncHp()
+        syncHpSnapshot(faintSnapshot)
         triggerFaint('player')
       },
     })
@@ -508,29 +533,33 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
   } else {
     const endEntries: QueueEntry[] = []
     const playerEnd = applyEndOfTurnStatus(player)
+    const playerEndSnapshot = captureHpSnapshot(player, enemy)
     if (playerEnd.message)
       endEntries.push({
         text: playerEnd.message,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(playerEndSnapshot)
           triggerShake('player')
         },
       })
     const enemyEnd = applyEndOfTurnStatus(enemy)
+    const enemyEndSnapshot = captureHpSnapshot(player, enemy)
     if (enemyEnd.message)
       endEntries.push({
         text: enemyEnd.message,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(enemyEndSnapshot)
           triggerShake('enemy')
         },
       })
+
+    const endSnapshot = captureHpSnapshot(player, enemy)
 
     if (player.currentHp <= 0) {
       endEntries.push({
         text: `${player.name} fainted...`,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(endSnapshot)
           triggerFaint('player')
         },
       })
@@ -540,7 +569,7 @@ const resolveEnemyTurn = (preEntries: QueueEntry[]) => {
       endEntries.push({
         text: `${enemy.name} fainted!`,
         onShow: () => {
-          syncHp()
+          syncHpSnapshot(endSnapshot)
           triggerFaint('enemy')
         },
       })
@@ -611,7 +640,8 @@ const useBattleItem = (itemId: ItemId) => {
   }
 
   const message = store.useItem(itemId)
-  resolveEnemyTurn([{ text: message, onShow: syncHp }])
+  const itemUseSnapshot = captureHpSnapshot(playerPokemon.value, enemyPokemon.value)
+  resolveEnemyTurn([{ text: message, onShow: () => syncHpSnapshot(itemUseSnapshot) }])
   menuMode.value = 'MAIN'
 }
 
