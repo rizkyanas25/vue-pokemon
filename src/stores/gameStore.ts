@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { TILE, WALKABLE_TILES, type TileId, type NpcData } from '../constants/game'
-import { overworldMap, overworldNpcs, overworldSpawn, pokemonCenterRespawn } from '../data/overworld'
+import {
+  getOverworldSectorTiles,
+  overworldMap,
+  overworldNpcs,
+  overworldSpawn,
+  pokemonCenterRespawn,
+} from '../data/overworld'
+import { INTERIORS, type InteriorId } from '../data/interiors'
 import {
   applyExperience,
   calculateStats,
@@ -39,7 +46,7 @@ export type GameState =
   | 'SHOP'
   | 'TRAINER_SELECT'
   | 'TRANSITION'
-export type MenuTab = 'party' | 'bag' | 'pokedex' | 'save'
+export type MenuTab = 'party' | 'pc' | 'bag' | 'pokedex' | 'save'
 
 export type BagItem = {
   id: ItemId
@@ -85,6 +92,7 @@ const placeholderStats = { hp: 50, atk: 50, def: 50, spa: 50, spd: 50, spe: 50 }
 export const useGameStore = defineStore('game', () => {
   const MOVE_ANIM_MS = 200
   const GLITCH_MS = 520
+  const PARTY_LIMIT = 6
   const LEGENDARY_IDS = new Set([144, 145, 146, 150, 151])
   const LEGENDARY_POOL = [144, 145, 146, 150, 151]
   const LEGENDARY_CHANCE = 0.1
@@ -114,6 +122,14 @@ export const useGameStore = defineStore('game', () => {
   const encounterLock = ref(false)
   const menuTab = ref<MenuTab>('party')
   const worldPos = ref({ x: 1, y: 1 })
+  const currentInteriorId = ref<InteriorId | null>(null)
+  const interiorReturn = ref<{
+    mapX: number
+    mapY: number
+    x: number
+    y: number
+    direction: Direction
+  } | null>(null)
   const mapCache = ref<Record<string, TileId[][]>>({})
   const npcCache = ref<Record<string, NpcData[]>>({})
   const money = ref(3000)
@@ -122,9 +138,10 @@ export const useGameStore = defineStore('game', () => {
     { id: 'potion', qty: 3 },
     { id: 'pokeball', qty: 5 },
   ])
+  const boxedPokemon = ref<PokemonInstance[]>([])
 
   const saveKey = 'pokemon-vue-save-v3'
-  const MAP_VERSION = 3
+  const MAP_VERSION = 5
   const legacySaveKey = 'pokemon-vue-save-v2'
   const legacySaveKeyV1 = 'pokemon-vue-save-v1'
   const hasSaveData = ref(false)
@@ -297,6 +314,11 @@ export const useGameStore = defineStore('game', () => {
 
   const markSeen = (species: PokemonSpecies) => upsertDexEntry(species, false)
   const markCaught = (species: PokemonSpecies) => upsertDexEntry(species, true)
+  const cloneNpc = (npc: NpcData): NpcData => ({
+    ...npc,
+    dialog: [...npc.dialog],
+  })
+  const cloneNpcList = (list: NpcData[]) => list.map(cloneNpc)
 
   const getNpcAt = (x: number, y: number) => npcs.value.find((npc) => npc.x === x && npc.y === y)
 
@@ -574,14 +596,12 @@ export const useGameStore = defineStore('game', () => {
     const key = mapKey(x, y)
     if (mapCache.value[key]) return key
 
-    const width = overworldMap.width
-    const height = overworldMap.height
     const isCenter = x === 1 && y === 1
-    const tiles = isCenter ? overworldMap.tiles : generateMap(width, height)
+    const tiles = getOverworldSectorTiles(x, y)
     mapCache.value[key] = tiles
 
     const reachable = buildReachableSet(tiles)
-    const baseNpcs = isCenter ? [...overworldNpcs] : []
+    const baseNpcs = isCenter ? cloneNpcList(overworldNpcs) : []
     const npcList = [...baseNpcs]
     const spawnCount = isCenter ? 1 : Math.random() < 0.6 ? 1 : 0
     for (let i = 0; i < spawnCount; i += 1) {
@@ -598,6 +618,8 @@ export const useGameStore = defineStore('game', () => {
   const setCurrentMap = (x: number, y: number) => {
     const key = ensureMapAt(x, y)
     worldPos.value = { x, y }
+    currentInteriorId.value = null
+    interiorReturn.value = null
     currentMap.value = mapCache.value[key] ?? overworldMap.tiles
     const reachable = buildReachableSet(currentMap.value)
     const npcList = (npcCache.value[key] ?? []).filter(
@@ -605,6 +627,48 @@ export const useGameStore = defineStore('game', () => {
     )
     npcCache.value[key] = npcList
     npcs.value = npcList
+  }
+
+  const setInteriorMap = (id: InteriorId) => {
+    const interior = INTERIORS[id]
+    currentInteriorId.value = id
+    currentMap.value = interior.tiles.map((row) => [...row])
+    npcs.value = cloneNpcList(interior.npcs)
+  }
+
+  const enterInterior = (id: InteriorId) => {
+    const interior = INTERIORS[id]
+    if (!interior) return
+    interiorReturn.value = {
+      mapX: worldPos.value.x,
+      mapY: worldPos.value.y,
+      x: player.value.x,
+      y: player.value.y,
+      direction: player.value.direction,
+    }
+    setInteriorMap(id)
+    player.value.x = interior.spawn.x
+    player.value.y = interior.spawn.y
+    player.value.direction = 'down'
+    player.value.step = 0
+    ensurePlayerOnWalkable()
+  }
+
+  const leaveInterior = () => {
+    const returnPoint = interiorReturn.value
+    if (!returnPoint) return
+    setCurrentMap(returnPoint.mapX, returnPoint.mapY)
+    player.value.x = returnPoint.x
+    player.value.y = returnPoint.y
+    player.value.direction = returnPoint.direction
+    player.value.step = 0
+    ensurePlayerOnWalkable()
+  }
+
+  const isOnInteriorExitTile = () => {
+    if (!currentInteriorId.value) return false
+    const interior = INTERIORS[currentInteriorId.value]
+    return interior.exitTiles.some((tile) => tile.x === player.value.x && tile.y === player.value.y)
   }
 
   const isWalkable = (x: number, y: number) => {
@@ -647,6 +711,7 @@ export const useGameStore = defineStore('game', () => {
     const height = currentMap.value.length
 
     const tryTransition = () => {
+      if (currentInteriorId.value) return false
       const nextWorldX = worldPos.value.x + Math.sign(dx)
       const nextWorldY = worldPos.value.y + Math.sign(dy)
       if (nextWorldX < 0 || nextWorldX > 2 || nextWorldY < 0 || nextWorldY > 2) return false
@@ -698,6 +763,10 @@ export const useGameStore = defineStore('game', () => {
     }
 
     if (newX < 0 || newX > width - 1 || newY < 0 || newY > height - 1) {
+      if (currentInteriorId.value && isOnInteriorExitTile()) {
+        leaveInterior()
+        return
+      }
       if (tryTransition()) return
       return
     }
@@ -713,17 +782,19 @@ export const useGameStore = defineStore('game', () => {
     player.value.y = newY
     player.value.step = (player.value.step + 1) % 2
 
-    const nearbyTrainer = findAdjacentTrainer()
-    if (nearbyTrainer) {
-      void startTrainerBattle(nearbyTrainer, tile)
-      return
-    }
+    if (!currentInteriorId.value) {
+      const nearbyTrainer = findAdjacentTrainer()
+      if (nearbyTrainer) {
+        void startTrainerBattle(nearbyTrainer, tile)
+        return
+      }
 
-    if (tile === TILE.BUSH && Math.random() < 0.12) {
-      void startWildBattle(tile)
-    }
+      if (tile === TILE.BUSH && Math.random() < 0.12) {
+        void startWildBattle(tile)
+      }
 
-    maybeSpawnTrainer(mapKey(worldPos.value.x, worldPos.value.y))
+      maybeSpawnTrainer(mapKey(worldPos.value.x, worldPos.value.y))
+    }
   }
 
   function setDirection(dir: Direction) {
@@ -776,6 +847,7 @@ export const useGameStore = defineStore('game', () => {
   function startWildBattle(tile?: TileId) {
     if (gameState.value !== 'ROAMING' || isLoading.value || encounterLock.value)
       return Promise.resolve()
+    if (currentInteriorId.value) return Promise.resolve()
     const activePokemon = player.value.party[player.value.activeIndex]
     if (!activePokemon) return Promise.resolve()
 
@@ -940,15 +1012,45 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function catchPokemon(pokemon: PokemonInstance) {
-    if (player.value.party.length < 6) {
+    if (player.value.party.length < PARTY_LIMIT) {
       pokemon.status = 'none'
       pokemon.statusTurns = 0
       player.value.party.push(pokemon)
       markCaught(pokemon.species)
       return { added: true, message: `${pokemon.name} was added to your party!` }
     }
+    pokemon.status = 'none'
+    pokemon.statusTurns = 0
+    boxedPokemon.value.push(pokemon)
     markCaught(pokemon.species)
-    return { added: false, message: `Your party is full! ${pokemon.name} was released...` }
+    return { added: false, message: `Your party is full! ${pokemon.name} was sent to the PC Box.` }
+  }
+
+  function movePartyPokemonToBox(index: number) {
+    if (index < 0 || index >= player.value.party.length) return 'Invalid party slot.'
+    if (player.value.party.length <= 1) return 'You need at least 1 Pokemon in your party.'
+
+    const [moved] = player.value.party.splice(index, 1)
+    if (!moved) return 'Failed to move Pokemon.'
+    boxedPokemon.value.push(moved)
+
+    if (player.value.activeIndex >= player.value.party.length) {
+      player.value.activeIndex = Math.max(0, player.value.party.length - 1)
+    } else if (index < player.value.activeIndex) {
+      player.value.activeIndex -= 1
+    }
+
+    return `${moved.name} was moved to the PC Box.`
+  }
+
+  function moveBoxPokemonToParty(index: number) {
+    if (index < 0 || index >= boxedPokemon.value.length) return 'Invalid PC slot.'
+    if (player.value.party.length >= PARTY_LIMIT) return 'Your party is full.'
+
+    const [moved] = boxedPokemon.value.splice(index, 1)
+    if (!moved) return 'Failed to move Pokemon.'
+    player.value.party.push(moved)
+    return `${moved.name} joined your party.`
   }
 
   function addMoney(amount: number) {
@@ -987,15 +1089,18 @@ export const useGameStore = defineStore('game', () => {
 
   function serializeGame() {
     return {
-      version: 3,
+      version: 5,
       savedAt: new Date().toISOString(),
       player: player.value,
       playerTrainer: playerTrainer.value,
+      boxedPokemon: boxedPokemon.value,
       bag: bag.value,
       money: money.value,
       pokedex: pokedex.value,
       speciesCache: speciesCache.value,
       worldPos: worldPos.value,
+      currentInteriorId: currentInteriorId.value,
+      interiorReturn: interiorReturn.value,
       mapVersion: MAP_VERSION,
       mapCache: mapCache.value,
       npcCache: npcCache.value,
@@ -1088,12 +1193,24 @@ export const useGameStore = defineStore('game', () => {
       if (!data?.player?.party) return false
 
       const restoredParty = (data.player.party as PokemonInstance[]).map(normalizePokemon)
+      const restoredBox = Array.isArray(data.boxedPokemon)
+        ? (data.boxedPokemon as PokemonInstance[]).map(normalizePokemon)
+        : []
+      const normalizedParty = restoredParty.slice(0, PARTY_LIMIT)
+      if (restoredParty.length > PARTY_LIMIT) {
+        restoredBox.unshift(...restoredParty.slice(PARTY_LIMIT))
+      }
+      if (normalizedParty.length === 0 && restoredBox.length > 0) {
+        const candidate = restoredBox.shift()
+        if (candidate) normalizedParty.push(candidate)
+      }
       player.value = {
         ...player.value,
         ...data.player,
-        party: restoredParty,
+        party: normalizedParty,
       }
-      if (player.value.activeIndex >= restoredParty.length) {
+      boxedPokemon.value = restoredBox
+      if (player.value.activeIndex >= normalizedParty.length) {
         player.value.activeIndex = 0
       }
 
@@ -1135,7 +1252,55 @@ export const useGameStore = defineStore('game', () => {
       mapCache.value = shouldResetMaps ? {} : (data.mapCache ?? mapCache.value)
       npcCache.value = shouldResetMaps ? {} : (data.npcCache ?? npcCache.value)
 
-      setCurrentMap(worldPos.value.x, worldPos.value.y)
+      const loadedInteriorId =
+        typeof data.currentInteriorId === 'string' &&
+        Object.prototype.hasOwnProperty.call(INTERIORS, data.currentInteriorId)
+          ? (data.currentInteriorId as InteriorId)
+          : null
+
+      const rawReturn =
+        data.interiorReturn && typeof data.interiorReturn === 'object'
+          ? (data.interiorReturn as Partial<{
+              mapX: number
+              mapY: number
+              x: number
+              y: number
+              direction: Direction
+            }>)
+          : null
+      const normalizedReturn =
+        rawReturn &&
+        typeof rawReturn.mapX === 'number' &&
+        typeof rawReturn.mapY === 'number' &&
+        typeof rawReturn.x === 'number' &&
+        typeof rawReturn.y === 'number'
+          ? {
+              mapX: Math.min(2, Math.max(0, rawReturn.mapX)),
+              mapY: Math.min(2, Math.max(0, rawReturn.mapY)),
+              x: Math.max(0, rawReturn.x),
+              y: Math.max(0, rawReturn.y),
+              direction:
+                rawReturn.direction === 'up' ||
+                rawReturn.direction === 'down' ||
+                rawReturn.direction === 'left' ||
+                rawReturn.direction === 'right'
+                  ? rawReturn.direction
+                  : 'down',
+            }
+          : null
+
+      if (loadedInteriorId) {
+        interiorReturn.value = normalizedReturn ?? {
+          mapX: worldPos.value.x,
+          mapY: worldPos.value.y,
+          x: overworldSpawn.x,
+          y: overworldSpawn.y,
+          direction: 'down',
+        }
+        setInteriorMap(loadedInteriorId)
+      } else {
+        setCurrentMap(worldPos.value.x, worldPos.value.y)
+      }
       ensurePlayerOnWalkable()
       const rawDex = data.pokedex ?? {}
       pokedex.value = Object.entries(rawDex).reduce(
@@ -1220,6 +1385,7 @@ export const useGameStore = defineStore('game', () => {
       const moveOverrides = starter?.defaultMoves
       const instance = createPokemonInstance(species, 5, moveOverrides)
       player.value.party = [instance]
+      boxedPokemon.value = []
       player.value.activeIndex = 0
       worldPos.value = { x: 1, y: 1 }
       setCurrentMap(worldPos.value.x, worldPos.value.y)
@@ -1251,6 +1417,11 @@ export const useGameStore = defineStore('game', () => {
     const target = getFrontTile()
     const npc = getNpcAt(target.x, target.y)
     if (!npc) return
+
+    if (npc.role === 'portal' && npc.interiorId) {
+      enterInterior(npc.interiorId)
+      return
+    }
 
     if (npc.role === 'center') {
       healPartyFully()
@@ -1304,6 +1475,7 @@ export const useGameStore = defineStore('game', () => {
     battleTransition,
     menuTab,
     bag,
+    boxedPokemon,
     money,
     currentShopId,
     pokedex,
@@ -1323,6 +1495,8 @@ export const useGameStore = defineStore('game', () => {
     useItem,
     useCatchItem,
     catchPokemon,
+    movePartyPokemonToBox,
+    moveBoxPokemonToParty,
     applyBattleProgression,
     addMoney,
     openShop,
@@ -1334,6 +1508,7 @@ export const useGameStore = defineStore('game', () => {
     chooseStarter,
     chooseTrainer,
     worldPos,
+    currentInteriorId,
     mapCache,
   }
 })

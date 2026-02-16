@@ -166,7 +166,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Minimap Overlay -->
-    <div class="minimap-overlay" v-if="store.gameState === 'ROAMING'">
+    <div class="minimap-overlay" v-if="store.gameState === 'ROAMING' && !store.currentInteriorId">
       <MiniMap />
     </div>
 
@@ -214,16 +214,18 @@ body {
 
 .ui-overlay {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  /* Removed centering */
+  top: 16px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
   z-index: 100;
-  text-align: right;
+  text-align: center;
   background: rgba(0, 0, 0, 0.5);
   padding: 10px;
   border-radius: 8px;
   pointer-events: none; /* Allow clicking through to map if needed */
-  max-width: 300px; /* Prevent it from getting too wide on small screens */
+  width: min(640px, calc(100vw - 320px));
+  min-width: 300px;
 }
 
 .ui-overlay h1 {
@@ -278,7 +280,10 @@ body {
     top: calc(env(safe-area-inset-top) + 8px);
     left: 12px;
     right: 12px;
+    transform: none;
     max-width: none;
+    min-width: 0;
+    width: auto;
     text-align: center;
     padding: 8px 10px;
     border-radius: 10px;

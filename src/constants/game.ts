@@ -22,6 +22,9 @@ export const TILE_COLORS: Record<TileId, string> = {
 
 export const WALKABLE_TILES = new Set<TileId>([TILE.GRASS, TILE.PATH, TILE.BUSH, TILE.BRIDGE])
 
+export type NpcRole = 'trainer' | 'shop' | 'center' | 'portal'
+export type NpcInteriorId = 'pokemon_center' | 'poke_mart'
+
 export type NpcData = {
   id: string
   name: string
@@ -33,6 +36,7 @@ export type NpcData = {
   pokemonId?: number
   pokemonKey?: string
   shopId?: string
-  role?: 'trainer' | 'shop' | 'center'
+  role?: NpcRole
+  interiorId?: NpcInteriorId
   defeated?: boolean
 }
